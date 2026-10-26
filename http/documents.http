@@ -1,0 +1,140 @@
+@host = http://localhost:8080
+
+### 1. 로그인 (토큰을 전역 변수 token 에 저장) - 이메일/비밀번호는 본인 계정으로 수정
+POST {{host}}/api/v1/auth/login
+Content-Type: application/json
+
+{
+  "email": "test@example.com",
+  "password": "Test1234!"
+}
+
+> {% client.global.set("token", response.body.data.accessToken); %}
+
+### 2. 엔진/망 모드 (4)
+GET {{host}}/api/v1/engines
+Authorization: Bearer {{token}}
+
+### 3. 업로드 (5) - 같은 폴더에 sample.pdf 를 두세요. extractImages=true 면 추출 이미지 1장이 생깁니다
+POST {{host}}/api/v1/documents
+Authorization: Bearer {{token}}
+Content-Type: multipart/form-data; boundary=boundary
+
+--boundary
+Content-Disposition: form-data; name="file"; filename="sample.pdf"
+Content-Type: application/pdf
+
+< ./sample.pdf
+--boundary
+Content-Disposition: form-data; name="engine"
+
+AUTO
+--boundary
+Content-Disposition: form-data; name="extractImages"
+
+true
+--boundary--
+
+> {% client.global.set("documentId", response.body.data.documentId); client.global.set("runId", response.body.data.runId); %}
+
+### 4. 목록 (6) - page 는 0부터, size 1~50, sort=createdAt,desc|asc, status 는 선택
+GET {{host}}/api/v1/documents?page=0&size=10&sort=createdAt,desc
+Authorization: Bearer {{token}}
+
+### 5. 목록 - 상태 필터
+GET {{host}}/api/v1/documents?status=DONE
+Authorization: Bearer {{token}}
+
+### 6. 상세 (7) - 업로드 약 2초 뒤 status 가 DONE, latestRun.pages / images 가 채워집니다
+GET {{host}}/api/v1/documents/{{documentId}}
+Authorization: Bearer {{token}}
+
+> {% if (response.body.data.latestRun && response.body.data.latestRun.images.length > 0) { client.global.set("imageId", response.body.data.latestRun.images[0].imageId); } %}
+
+### 7. 원본 PDF (9)
+GET {{host}}/api/v1/documents/{{documentId}}/file
+Authorization: Bearer {{token}}
+
+### 8. 실행 이력 (10)
+GET {{host}}/api/v1/documents/{{documentId}}/runs
+Authorization: Bearer {{token}}
+
+### 9. 실행 상세 (11)
+GET {{host}}/api/v1/documents/{{documentId}}/runs/{{runId}}
+Authorization: Bearer {{token}}
+
+### 10. 내보내기 txt (13)
+GET {{host}}/api/v1/documents/{{documentId}}/runs/{{runId}}/export?format=txt
+Authorization: Bearer {{token}}
+
+### 11. 내보내기 json (13)
+GET {{host}}/api/v1/documents/{{documentId}}/runs/{{runId}}/export?format=json
+Authorization: Bearer {{token}}
+
+### 12. 추출 이미지 (14) - 상세 조회(6)를 먼저 실행해 imageId 를 저장해야 합니다
+GET {{host}}/api/v1/documents/{{documentId}}/runs/{{runId}}/images/{{imageId}}
+Authorization: Bearer {{token}}
+
+### 13. 재처리 (12) - 새 run 이 추가되고 202
+POST {{host}}/api/v1/documents/{{documentId}}/reprocess
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+  "engine": "TESSERACT",
+  "extractImages": false
+}
+
+> {% client.global.set("runId", response.body.data.runId); %}
+
+### 14. 삭제 (8)
+DELETE {{host}}/api/v1/documents/{{documentId}}
+Authorization: Bearer {{token}}
+
+### --- 실패 케이스 ---
+
+### F1. 파일 없이 업로드 -> 400 INVALID_REQUEST
+POST {{host}}/api/v1/documents
+Authorization: Bearer {{token}}
+Content-Type: multipart/form-data; boundary=boundary
+
+--boundary
+Content-Disposition: form-data; name="engine"
+
+AUTO
+--boundary--
+
+### F2. 폐쇄망에서 OPENAI -> 400 ENGINE_NOT_ALLOWED
+POST {{host}}/api/v1/documents
+Authorization: Bearer {{token}}
+Content-Type: multipart/form-data; boundary=boundary
+
+--boundary
+Content-Disposition: form-data; name="file"; filename="sample.pdf"
+Content-Type: application/pdf
+
+< ./sample.pdf
+--boundary
+Content-Disposition: form-data; name="engine"
+
+OPENAI
+--boundary--
+
+### F3. 없는 문서 -> 404 DOCUMENT_NOT_FOUND
+GET {{host}}/api/v1/documents/999999
+Authorization: Bearer {{token}}
+
+### F4. 없는 run -> 404 RUN_NOT_FOUND
+GET {{host}}/api/v1/documents/{{documentId}}/runs/999999
+Authorization: Bearer {{token}}
+
+### F5. export format 오류 -> 400 INVALID_REQUEST
+GET {{host}}/api/v1/documents/{{documentId}}/runs/{{runId}}/export?format=pdf
+Authorization: Bearer {{token}}
+
+### F6. size 범위 초과 -> 400 INVALID_REQUEST
+GET {{host}}/api/v1/documents?size=100
+Authorization: Bearer {{token}}
+
+### F7. 토큰 없이 -> 401 UNAUTHORIZED
+GET {{host}}/api/v1/documents

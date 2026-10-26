@@ -1,0 +1,25 @@
+spring:
+  application:
+    name: backend
+  datasource:
+    url: jdbc:mysql://${MYSQL_HOST:ocr-mysql}:${MYSQL_PORT:3306}/${MYSQL_DATABASE:ocrdb}?serverTimezone=Asia/Seoul&characterEncoding=UTF-8
+    username: ${MYSQL_USER:user}
+    password: ${MYSQL_PASSWORD}
+  jpa:
+    hibernate:
+      ddl-auto: validate
+    open-in-view: false
+  servlet:
+    multipart:
+      max-file-size: 20MB
+      max-request-size: 25MB
+app:
+  jwt:
+    secret: ${JWT_SECRET}
+    expiration-seconds: 3600
+  storage:
+    dir: ./storage
+  ocr:
+    client: mock
+    base-url: http://0.0.0.0:${PYTHON_SERVER_PORT}
+    timeout-seconds: 600

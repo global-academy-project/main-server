@@ -1,0 +1,44 @@
+@host = http://localhost:8080
+
+### 1) 회원가입 -> 201
+POST {{host}}/api/v1/auth/signup
+Content-Type: application/json
+
+{ "email": "test@example.com", "password": "Test1234!", "name": "tester" }
+
+### 2) 회원가입 중복 -> 409 EMAIL_DUPLICATED (1번을 한 번 더)
+POST {{host}}/api/v1/auth/signup
+Content-Type: application/json
+
+{ "email": "TEST@example.com", "password": "Test1234!", "name": "tester" }
+
+### 3) 회원가입 검증 실패 -> 400 INVALID_REQUEST (비밀번호 규칙)
+POST {{host}}/api/v1/auth/signup
+Content-Type: application/json
+
+{ "email": "bad", "password": "abc", "name": "" }
+
+### 4) 로그인 -> 200, 토큰을 {{token}} 에 저장
+POST {{host}}/api/v1/auth/login
+Content-Type: application/json
+
+{ "email": "test@example.com", "password": "Test1234!" }
+
+> {% client.global.set("token", response.body.data.accessToken); %}
+
+### 5) 로그인 실패 -> 401 LOGIN_FAILED
+POST {{host}}/api/v1/auth/login
+Content-Type: application/json
+
+{ "email": "test@example.com", "password": "wrong" }
+
+### 6) 내 정보 -> 200
+GET {{host}}/api/v1/users/me
+Authorization: Bearer {{token}}
+
+### 7) 토큰 없음 -> 401 UNAUTHORIZED
+GET {{host}}/api/v1/users/me
+
+### 8) 잘못된 토큰 -> 401 UNAUTHORIZED
+GET {{host}}/api/v1/users/me
+Authorization: Bearer invalid.token.value

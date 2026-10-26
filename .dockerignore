@@ -1,0 +1,33 @@
+# Environment files and Git directory
+.env
+.env.*
+
+# Git directory
+.git
+
+# Build and dependency directories
+build/
+.gradle/
+
+# IDE and local configuration files
+.idea/
+*/application-local.
+
+# GitHub and Git related files
+.github/
+.git/
+.gitignore
+
+# Project documentation and configuration files
+LICENSE
+README.md
+SECURITY.md
+SUPPORT.md
+CONTRIBUTING.md
+CODE_OF_CONDUCT.md
+CHANGELOG.md
+
+# Docker related files
+Dockerfile
+docker-compose.yml
+.dockerignore
