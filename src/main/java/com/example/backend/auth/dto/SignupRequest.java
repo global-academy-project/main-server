@@ -17,6 +17,23 @@ public record SignupRequest(
         String password,
 
         @NotBlank @Size(min = 1, max = 50)
-        String name
+        String name,
+
+        // 선택. 숫자만, 0으로 시작하는 9~11자리 (DB ck_users_phone 과 같은 규칙). 빈 문자열은 미입력으로 본다
+        @Pattern(regexp = "^$|^0[0-9]{8,10}$", message = "숫자만, 0으로 시작하는 9~11자리로 입력해주세요.")
+        String phone,
+
+        // 선택
+        @Size(max = 100)
+        String department,
+
+        // 선택
+        @Size(max = 50)
+        String jobTitle
 ) {
+
+        /** 선택 항목 없이 가입 (기존 호출·테스트 호환) */
+        public SignupRequest(String email, String password, String name) {
+                this(email, password, name, null, null, null);
+        }
 }

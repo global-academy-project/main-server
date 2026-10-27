@@ -27,6 +27,12 @@ public class GlobalExceptionHandler {
         return build(e.getErrorCode(), e.getMessage(), List.of());
     }
 
+    /** 다른 사람이 먼저 수정함 (@Version lock_version) */
+    @ExceptionHandler(org.springframework.dao.OptimisticLockingFailureException.class)
+    public ResponseEntity<ApiResponse<Void>> handleOptimisticLock(Exception e) {
+        return build(ErrorCode.CONFLICT_MODIFIED, ErrorCode.CONFLICT_MODIFIED.getDefaultMessage(), List.of());
+    }
+
     /** @Valid 검증 실패 (MethodArgumentNotValidException 포함) */
     @ExceptionHandler(BindException.class)
     public ResponseEntity<ApiResponse<Void>> handleBind(BindException e) {

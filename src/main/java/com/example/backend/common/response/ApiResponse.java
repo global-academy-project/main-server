@@ -1,7 +1,7 @@
 package com.example.backend.common.response;
 
 import com.fasterxml.jackson.annotation.JsonInclude;
-import com.fasterxml.jackson.databind.node.NullNode;
+import tools.jackson.databind.node.NullNode;
 
 import java.util.List;
 

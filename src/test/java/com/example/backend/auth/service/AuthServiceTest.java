@@ -3,10 +3,16 @@ package com.example.backend.auth.service;
 import com.example.backend.auth.dto.LoginRequest;
 import com.example.backend.auth.dto.SignupRequest;
 import com.example.backend.auth.dto.TokenResponse;
+import com.example.backend.auth.entity.AccountToken;
+import com.example.backend.auth.entity.TokenPurpose;
 import com.example.backend.auth.jwt.JwtProvider;
+import com.example.backend.auth.mail.AuthMailSender;
+import com.example.backend.common.exception.BusinessException;
 import com.example.backend.common.exception.ErrorCode;
 import com.example.backend.user.dto.UserResponse;
+import com.example.backend.user.entity.EmailVerifiedVia;
 import com.example.backend.user.entity.User;
+import com.example.backend.user.entity.UserStatus;
 import com.example.backend.user.repository.UserRepository;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -16,22 +22,36 @@ import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.test.util.ReflectionTestUtils;
 
+import java.time.Clock;
+import java.time.Instant;
+import java.time.LocalDateTime;
+import java.time.ZoneId;
 import java.util.Optional;
 
 import static com.example.backend.support.TestFixtures.expectCode;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyLong;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
-@DisplayName("AuthService: 회원가입 / 로그인")
+@DisplayName("AuthService: 가입 / 로그인 / 이메일 인증")
 class AuthServiceTest {
+
+    private static final ZoneId KST = ZoneId.of("Asia/Seoul");
+    private final Clock clock = Clock.fixed(Instant.parse("2026-10-27T01:00:00Z"), KST);
+    private final LocalDateTime now = LocalDateTime.now(clock);
 
     private UserRepository userRepository;
     private PasswordEncoder passwordEncoder;
     private JwtProvider jwtProvider;
+    private AccountTokenService tokenService;
+    private AuthMailSender mailSender;
     private AuthService service;
 
     @BeforeEach
@@ -39,61 +59,85 @@ class AuthServiceTest {
         userRepository = mock(UserRepository.class);
         passwordEncoder = mock(PasswordEncoder.class);
         jwtProvider = mock(JwtProvider.class);
-        service = new AuthService(userRepository, passwordEncoder, jwtProvider);
+        tokenService = mock(AccountTokenService.class);
+        mailSender = mock(AuthMailSender.class);
+        when(passwordEncoder.encode("dummy-password-for-timing")).thenReturn("DUMMY");
+        service = new AuthService(userRepository, passwordEncoder, jwtProvider, tokenService, mailSender, clock,
+                10, "http://web.test/");
     }
 
-    private User storedUser() {
+    private User storedUser(UserStatus status, boolean verified) {
         User u = new User("user@example.com", "HASH", "홍길동");
         ReflectionTestUtils.setField(u, "id", 7L);
+        if (verified) {
+            u.verifyEmail(EmailVerifiedVia.LINK, now);
+        }
+        ReflectionTestUtils.setField(u, "status", status);
         return u;
+    }
+
+    private void givenUser(User u) {
+        when(userRepository.findByEmail("user@example.com")).thenReturn(Optional.of(u));
     }
 
     // ---------- signup ----------
 
     @Test
-    @DisplayName("가입: 이메일은 앞뒤 공백 제거 + 소문자, 이름은 trim, 비밀번호는 암호화해서 저장")
-    void signup_normalizesAndEncodes() {
+    @DisplayName("가입: 이메일 정규화·비밀번호 암호화, PENDING·미인증으로 저장하고 인증 메일을 보낸다")
+    void signup_savesPendingAndSendsMail() {
         when(passwordEncoder.encode("Passw0rd!")).thenReturn("ENCODED");
+        when(tokenService.issue(any(), eq(TokenPurpose.EMAIL_VERIFY), isNull(), eq("1.2.3.4")))
+                .thenReturn(Optional.of(new AccountTokenService.Issued("RAW", 10)));
 
-        UserResponse res = service.signup(new SignupRequest("  User@Example.COM ", "Passw0rd!", "  홍길동 "));
+        UserResponse res = service.signup(
+                new SignupRequest("  User@Example.COM ", "Passw0rd!", "  홍길동 ", "01012345678", " 안전보건팀 ", ""),
+                "1.2.3.4");
 
         ArgumentCaptor<User> saved = ArgumentCaptor.forClass(User.class);
         verify(userRepository).saveAndFlush(saved.capture());
-        assertThat(saved.getValue().getEmail()).isEqualTo("user@example.com");
-        assertThat(saved.getValue().getName()).isEqualTo("홍길동");
-        assertThat(saved.getValue().getPasswordHash()).isEqualTo("ENCODED").isNotEqualTo("Passw0rd!");
-        verify(userRepository).existsByEmail("user@example.com");
-        assertThat(res.email()).isEqualTo("user@example.com");
+        User u = saved.getValue();
+        assertThat(u.getEmail()).isEqualTo("user@example.com");
+        assertThat(u.getName()).isEqualTo("홍길동");
+        assertThat(u.getPasswordHash()).isEqualTo("ENCODED");
+        assertThat(u.getStatus()).isEqualTo(UserStatus.PENDING);
+        assertThat(u.isEmailVerified()).isFalse();
+        assertThat(u.getPhone()).isEqualTo("01012345678");
+        assertThat(u.getDepartment()).isEqualTo("안전보건팀");
+        assertThat(u.getJobTitle()).as("빈 문자열은 null 로").isNull();
+        assertThat(res.status()).isEqualTo(UserStatus.PENDING);
+        verify(mailSender).sendEmailVerification("user@example.com", "홍길동",
+                "http://web.test/verify-email?token=RAW", 10);
     }
 
     @Test
-    @DisplayName("이미 가입된 이메일(대소문자·공백만 다른 경우 포함)은 EMAIL_DUPLICATED, 저장하지 않는다")
+    @DisplayName("이미 가입된 이메일은 EMAIL_DUPLICATED, 저장·메일 없음")
     void signup_duplicate() {
         when(userRepository.existsByEmail("user@example.com")).thenReturn(true);
 
-        expectCode(() -> service.signup(new SignupRequest(" USER@example.com", "Passw0rd!", "a")),
+        expectCode(() -> service.signup(new SignupRequest(" USER@example.com", "Passw0rd!", "a"), "ip"),
                 ErrorCode.EMAIL_DUPLICATED);
 
         verify(userRepository, never()).saveAndFlush(any());
-        verify(passwordEncoder, never()).encode(any());
+        verify(mailSender, never()).sendEmailVerification(any(), any(), any(), anyLong());
     }
 
     @Test
-    @DisplayName("동시 가입으로 DB unique 제약에 걸리면(경쟁 상태) EMAIL_DUPLICATED 로 변환")
+    @DisplayName("동시 가입으로 DB unique 제약에 걸리면 EMAIL_DUPLICATED")
     void signup_raceCondition() {
         when(passwordEncoder.encode(any())).thenReturn("ENCODED");
         when(userRepository.saveAndFlush(any(User.class))).thenThrow(new DataIntegrityViolationException("dup"));
 
-        expectCode(() -> service.signup(new SignupRequest("a@b.com", "Passw0rd!", "a")), ErrorCode.EMAIL_DUPLICATED);
+        expectCode(() -> service.signup(new SignupRequest("a@b.com", "Passw0rd!", "a"), "ip"), ErrorCode.EMAIL_DUPLICATED);
     }
 
     // ---------- login ----------
 
     @Test
-    @DisplayName("로그인 성공: 토큰, Bearer, 만료 시간, 사용자 정보를 돌려준다 (이메일 정규화 후 조회)")
+    @DisplayName("로그인 성공(ACTIVE·인증됨): 토큰 발급, 실패 횟수 초기화, 마지막 로그인 기록")
     void login_success() {
-        User user = storedUser();
-        when(userRepository.findByEmail("user@example.com")).thenReturn(Optional.of(user));
+        User user = storedUser(UserStatus.ACTIVE, true);
+        ReflectionTestUtils.setField(user, "failedLoginCount", 3);
+        givenUser(user);
         when(passwordEncoder.matches("Passw0rd!", "HASH")).thenReturn(true);
         when(jwtProvider.createToken(7L)).thenReturn("JWT");
         when(jwtProvider.getExpirationSeconds()).thenReturn(3600L);
@@ -102,22 +146,143 @@ class AuthServiceTest {
 
         assertThat(res.accessToken()).isEqualTo("JWT");
         assertThat(res.tokenType()).isEqualTo("Bearer");
-        assertThat(res.expiresIn()).isEqualTo(3600L);
+        assertThat(res.mustChangePassword()).isFalse();
         assertThat(res.user().userId()).isEqualTo(7L);
-        assertThat(res.user().email()).isEqualTo("user@example.com");
+        assertThat(user.getFailedLoginCount()).isZero();
+        assertThat(user.getLastLoginAt()).isEqualTo(now);
     }
 
     @Test
-    @DisplayName("없는 이메일 / 틀린 비밀번호는 같은 LOGIN_FAILED (어느 쪽이 틀렸는지 알려주지 않음), 토큰 미발급")
+    @DisplayName("없는 이메일 / 틀린 비밀번호는 같은 LOGIN_FAILED, 토큰 미발급. 없는 이메일도 비밀번호 비교를 한다(시간 동일)")
     void login_failure_sameForBothCases() {
         when(userRepository.findByEmail("none@example.com")).thenReturn(Optional.empty());
-        when(userRepository.findByEmail("user@example.com")).thenReturn(Optional.of(storedUser()));
+        givenUser(storedUser(UserStatus.ACTIVE, true));
         when(passwordEncoder.matches("wrong", "HASH")).thenReturn(false);
 
         var unknownEmail = expectCode(() -> service.login(new LoginRequest("none@example.com", "x")), ErrorCode.LOGIN_FAILED);
         var wrongPassword = expectCode(() -> service.login(new LoginRequest("user@example.com", "wrong")), ErrorCode.LOGIN_FAILED);
 
         assertThat(unknownEmail.getMessage()).isEqualTo(wrongPassword.getMessage());
+        verify(passwordEncoder).matches("x", "DUMMY");
         verify(jwtProvider, never()).createToken(any());
+    }
+
+    @Test
+    @DisplayName("10번째 실패에서 잠기고 ACCOUNT_LOCKED. 잠긴 뒤에는 맞는 비밀번호도 ACCOUNT_LOCKED")
+    void login_locksAfterTenFailures() {
+        User user = storedUser(UserStatus.ACTIVE, true);
+        givenUser(user);
+        when(passwordEncoder.matches("wrong", "HASH")).thenReturn(false);
+        when(passwordEncoder.matches("Passw0rd!", "HASH")).thenReturn(true);
+
+        for (int i = 1; i <= 9; i++) {
+            expectCode(() -> service.login(new LoginRequest("user@example.com", "wrong")), ErrorCode.LOGIN_FAILED);
+        }
+        assertThat(user.getStatus()).isEqualTo(UserStatus.ACTIVE);
+
+        expectCode(() -> service.login(new LoginRequest("user@example.com", "wrong")), ErrorCode.ACCOUNT_LOCKED);
+        assertThat(user.getStatus()).isEqualTo(UserStatus.LOCKED);
+        assertThat(user.getFailedLoginCount()).isEqualTo(10);
+
+        expectCode(() -> service.login(new LoginRequest("user@example.com", "Passw0rd!")), ErrorCode.ACCOUNT_LOCKED);
+        verify(jwtProvider, never()).createToken(any());
+    }
+
+    @Test
+    @DisplayName("승인 전(PENDING) 계정은 실패가 쌓여도 잠그지 않는다 (어차피 로그인 불가)")
+    void login_pendingNotLocked() {
+        User user = storedUser(UserStatus.PENDING, false);
+        givenUser(user);
+        when(passwordEncoder.matches("wrong", "HASH")).thenReturn(false);
+
+        for (int i = 0; i < 12; i++) {
+            expectCode(() -> service.login(new LoginRequest("user@example.com", "wrong")), ErrorCode.LOGIN_FAILED);
+        }
+        assertThat(user.getStatus()).isEqualTo(UserStatus.PENDING);
+    }
+
+    @Test
+    @DisplayName("비밀번호가 맞을 때 상태 안내: 미인증 → EMAIL_NOT_VERIFIED, 인증·승인 대기 → ACCOUNT_PENDING, 중지 → ACCOUNT_INACTIVE")
+    void login_statusMessages() {
+        when(passwordEncoder.matches("Passw0rd!", "HASH")).thenReturn(true);
+
+        givenUser(storedUser(UserStatus.PENDING, false));
+        expectCode(() -> service.login(new LoginRequest("user@example.com", "Passw0rd!")), ErrorCode.EMAIL_NOT_VERIFIED);
+
+        givenUser(storedUser(UserStatus.PENDING, true));
+        expectCode(() -> service.login(new LoginRequest("user@example.com", "Passw0rd!")), ErrorCode.ACCOUNT_PENDING);
+
+        givenUser(storedUser(UserStatus.INACTIVE, true));
+        expectCode(() -> service.login(new LoginRequest("user@example.com", "Passw0rd!")), ErrorCode.ACCOUNT_INACTIVE);
+
+        verify(jwtProvider, never()).createToken(any());
+    }
+
+    @Test
+    @DisplayName("첫 관리자처럼 비밀번호 변경이 필요하면 응답에 mustChangePassword=true")
+    void login_mustChangePassword() {
+        User admin = User.bootstrapAdmin("user@example.com", "HASH", now);
+        ReflectionTestUtils.setField(admin, "id", 1L);
+        givenUser(admin);
+        when(passwordEncoder.matches("Admin1234!", "HASH")).thenReturn(true);
+        when(jwtProvider.createToken(1L)).thenReturn("JWT");
+
+        TokenResponse res = service.login(new LoginRequest("user@example.com", "Admin1234!"));
+
+        assertThat(res.mustChangePassword()).isTrue();
+    }
+
+    // ---------- email verify ----------
+
+    @Test
+    @DisplayName("이메일 인증: 토큰을 쓰면 인증 시각·LINK 기록, 상태는 PENDING 그대로")
+    void verifyEmail_marksVerified() {
+        User user = storedUser(UserStatus.PENDING, false);
+        AccountToken token = new AccountToken(7L, TokenPurpose.EMAIL_VERIFY, "h".repeat(64), null, null, now, now.plusMinutes(10));
+        when(tokenService.consume("RAW", TokenPurpose.EMAIL_VERIFY)).thenReturn(token);
+        when(userRepository.findById(7L)).thenReturn(Optional.of(user));
+
+        service.verifyEmail("RAW");
+
+        assertThat(user.isEmailVerified()).isTrue();
+        assertThat(user.getEmailVerifiedVia()).isEqualTo(EmailVerifiedVia.LINK);
+        assertThat(user.getStatus()).isEqualTo(UserStatus.PENDING);
+    }
+
+    @Test
+    @DisplayName("재발송: 없는 이메일·이미 인증된 계정은 조용히 넘어간다 (메일 없음, 예외 없음)")
+    void resend_silentForUnknownOrVerified() {
+        when(userRepository.findByEmail("none@example.com")).thenReturn(Optional.empty());
+        service.resendVerification("none@example.com", "ip");
+
+        givenUser(storedUser(UserStatus.PENDING, true));
+        service.resendVerification("user@example.com", "ip");
+
+        verify(tokenService, never()).issue(any(), any(), any(), any());
+        verify(mailSender, never()).sendEmailVerification(any(), any(), any(), anyLong());
+    }
+
+    @Test
+    @DisplayName("재발송: 미인증 PENDING 계정이면 새 토큰으로 메일을 보낸다")
+    void resend_sendsForUnverified() {
+        givenUser(storedUser(UserStatus.PENDING, false));
+        when(tokenService.issue(7L, TokenPurpose.EMAIL_VERIFY, null, "ip"))
+                .thenReturn(Optional.of(new AccountTokenService.Issued("NEW", 10)));
+
+        service.resendVerification("User@example.com", "ip");
+
+        verify(tokenService).checkIpLimit("ip");
+        verify(mailSender).sendEmailVerification(eq("user@example.com"), anyString(),
+                eq("http://web.test/verify-email?token=NEW"), eq(10L));
+    }
+
+    @Test
+    @DisplayName("재발송: 같은 IP 한도를 넘으면 계정이 없어도 TOO_MANY_REQUESTS (가입 여부와 무관)")
+    void resend_ipLimit() {
+        org.mockito.Mockito.doThrow(new BusinessException(ErrorCode.TOO_MANY_REQUESTS))
+                .when(tokenService).checkIpLimit("ip");
+
+        expectCode(() -> service.resendVerification("none@example.com", "ip"), ErrorCode.TOO_MANY_REQUESTS);
+        verify(userRepository, never()).findByEmail(any());
     }
 }

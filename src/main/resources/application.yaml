@@ -2,9 +2,10 @@ spring:
   application:
     name: backend
   datasource:
-    url: jdbc:mysql://${MYSQL_HOST:ocr-mysql}:${MYSQL_PORT:3306}/${MYSQL_DATABASE:ocrdb}?serverTimezone=Asia/Seoul&characterEncoding=UTF-8
+    # 기본값은 로컬 개발용 (mysql-local). 통합(compose)에서는 환경 변수로 덮어쓴다
+    url: jdbc:mysql://${MYSQL_HOST:localhost}:${MYSQL_PORT:3307}/${MYSQL_DATABASE:ocrdb}?serverTimezone=Asia/Seoul&characterEncoding=UTF-8
     username: ${MYSQL_USER:user}
-    password: ${MYSQL_PASSWORD}
+    password: ${MYSQL_PASSWORD:pass}
   # 스키마는 Flyway가 만든다 (db/migration/V*.sql). JPA는 맞는지 확인만 (validate)
   flyway:
     enabled: true
@@ -23,6 +24,14 @@ spring:
       hibernate:
         jdbc:
           time_zone: Asia/Seoul
+  mail:
+    host: ${MAIL_HOST:}
+    port: ${MAIL_PORT:587}
+    username: ${MAIL_USERNAME:}
+    password: ${MAIL_PASSWORD:}
+    properties:
+      mail.smtp.auth: true
+      mail.smtp.starttls.enable: true
   servlet:
     multipart:
       max-file-size: 20MB
@@ -30,7 +39,20 @@ spring:
 app:
   jwt:
     secret: ${JWT_SECRET}
+    # 2단계(refresh token)에서 900(15분)으로 줄인다. 지금 줄이면 15분마다 로그아웃된다
     expiration-seconds: 3600
+  auth:
+    max-failed-login: 10          # 이 횟수만큼 틀리면 잠금
+    mail-token-minutes: 10        # 메일 링크 유효 시간 (인증, 비밀번호 재설정)
+    mail-max-per-user-hour: 5     # 한 사람에게 1시간에 보낼 수 있는 메일 수
+    mail-max-per-ip-hour: 30      # 같은 IP 1시간 요청 수 (회사는 여러 명이 같은 IP)
+  web:
+    # 메일 링크가 가리킬 웹 주소
+    base-url: ${WEB_BASE_URL:http://localhost:5173}
+  mail:
+    # log: 메일 대신 서버 로그에 링크 출력 (개발) / smtp: 실제 발송 (spring.mail.* 필요)
+    mode: ${MAIL_MODE:log}
+    from: ${MAIL_FROM:no-reply@example.com}
   storage:
     dir: ./storage
   internal:
@@ -42,5 +64,5 @@ app:
     password: ${ADMIN_PASSWORD:}
   ocr:
     client: mock
-    base-url: http://0.0.0.0:${PYTHON_SERVER_PORT}
+    base-url: http://localhost:60100
     timeout-seconds: 600
