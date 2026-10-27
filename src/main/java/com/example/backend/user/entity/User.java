@@ -133,6 +133,20 @@ public class User {
         this.lastLoginAt = now;
     }
 
+    /**
+     * 비밀번호 변경 (재설정·직접 변경 공통). 실패 횟수 초기화, 강제 변경 해제.
+     * 잠긴 계정은 다시 사용 가능으로 돌린다 (잠금은 ACTIVE 에서만 걸리므로 이메일 인증은 이미 돼 있다).
+     */
+    public void changePassword(String newHash, LocalDateTime now) {
+        this.passwordHash = newHash;
+        this.passwordChangedAt = now;
+        this.mustChangePassword = false;
+        this.failedLoginCount = 0;
+        if (this.status == UserStatus.LOCKED) {
+            this.status = UserStatus.ACTIVE;
+        }
+    }
+
     public boolean isEmailVerified() {
         return emailVerifiedAt != null;
     }

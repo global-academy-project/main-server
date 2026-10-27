@@ -4,6 +4,7 @@ import com.example.backend.auth.dto.LoginRequest;
 import com.example.backend.auth.dto.SignupRequest;
 import com.example.backend.auth.dto.TokenResponse;
 import com.example.backend.auth.entity.AccountToken;
+import com.example.backend.auth.entity.RevokeReason;
 import com.example.backend.auth.entity.TokenPurpose;
 import com.example.backend.auth.jwt.JwtProvider;
 import com.example.backend.auth.mail.AuthMailSender;
@@ -23,6 +24,7 @@ import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.test.util.ReflectionTestUtils;
 
 import java.time.Clock;
+import java.time.Duration;
 import java.time.Instant;
 import java.time.LocalDateTime;
 import java.time.ZoneId;
@@ -31,6 +33,7 @@ import java.util.Optional;
 import static com.example.backend.support.TestFixtures.expectCode;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
@@ -52,6 +55,8 @@ class AuthServiceTest {
     private JwtProvider jwtProvider;
     private AccountTokenService tokenService;
     private AuthMailSender mailSender;
+    private RefreshTokenService refreshTokenService;
+    private PasswordService passwordService;
     private AuthService service;
 
     @BeforeEach
@@ -61,9 +66,13 @@ class AuthServiceTest {
         jwtProvider = mock(JwtProvider.class);
         tokenService = mock(AccountTokenService.class);
         mailSender = mock(AuthMailSender.class);
+        refreshTokenService = mock(RefreshTokenService.class);
+        passwordService = mock(PasswordService.class);
         when(passwordEncoder.encode("dummy-password-for-timing")).thenReturn("DUMMY");
-        service = new AuthService(userRepository, passwordEncoder, jwtProvider, tokenService, mailSender, clock,
-                10, "http://web.test/");
+        when(refreshTokenService.issue(anyLong(), anyBoolean(), any(), any()))
+                .thenAnswer(inv -> new RefreshTokenService.Issued(inv.getArgument(0), "RT", inv.getArgument(1), Duration.ofMinutes(30)));
+        service = new AuthService(userRepository, passwordEncoder, jwtProvider, tokenService, refreshTokenService,
+                passwordService, mailSender, clock, 10, "http://web.test/");
     }
 
     private User storedUser(UserStatus status, boolean verified) {
@@ -142,7 +151,11 @@ class AuthServiceTest {
         when(jwtProvider.createToken(7L)).thenReturn("JWT");
         when(jwtProvider.getExpirationSeconds()).thenReturn(3600L);
 
-        TokenResponse res = service.login(new LoginRequest("  USER@Example.com ", "Passw0rd!"));
+        LoginResult result = service.login(new LoginRequest("  USER@Example.com ", "Passw0rd!", true), "UA", "ip");
+        TokenResponse res = result.body();
+
+        assertThat(result.refresh().rawToken()).isEqualTo("RT");
+        verify(refreshTokenService).issue(7L, true, "UA", "ip");
 
         assertThat(res.accessToken()).isEqualTo("JWT");
         assertThat(res.tokenType()).isEqualTo("Bearer");
@@ -159,8 +172,8 @@ class AuthServiceTest {
         givenUser(storedUser(UserStatus.ACTIVE, true));
         when(passwordEncoder.matches("wrong", "HASH")).thenReturn(false);
 
-        var unknownEmail = expectCode(() -> service.login(new LoginRequest("none@example.com", "x")), ErrorCode.LOGIN_FAILED);
-        var wrongPassword = expectCode(() -> service.login(new LoginRequest("user@example.com", "wrong")), ErrorCode.LOGIN_FAILED);
+        var unknownEmail = expectCode(() -> service.login(new LoginRequest("none@example.com", "x"), "UA", "ip").body(), ErrorCode.LOGIN_FAILED);
+        var wrongPassword = expectCode(() -> service.login(new LoginRequest("user@example.com", "wrong"), "UA", "ip").body(), ErrorCode.LOGIN_FAILED);
 
         assertThat(unknownEmail.getMessage()).isEqualTo(wrongPassword.getMessage());
         verify(passwordEncoder).matches("x", "DUMMY");
@@ -176,15 +189,15 @@ class AuthServiceTest {
         when(passwordEncoder.matches("Passw0rd!", "HASH")).thenReturn(true);
 
         for (int i = 1; i <= 9; i++) {
-            expectCode(() -> service.login(new LoginRequest("user@example.com", "wrong")), ErrorCode.LOGIN_FAILED);
+            expectCode(() -> service.login(new LoginRequest("user@example.com", "wrong"), "UA", "ip").body(), ErrorCode.LOGIN_FAILED);
         }
         assertThat(user.getStatus()).isEqualTo(UserStatus.ACTIVE);
 
-        expectCode(() -> service.login(new LoginRequest("user@example.com", "wrong")), ErrorCode.ACCOUNT_LOCKED);
+        expectCode(() -> service.login(new LoginRequest("user@example.com", "wrong"), "UA", "ip").body(), ErrorCode.ACCOUNT_LOCKED);
         assertThat(user.getStatus()).isEqualTo(UserStatus.LOCKED);
         assertThat(user.getFailedLoginCount()).isEqualTo(10);
 
-        expectCode(() -> service.login(new LoginRequest("user@example.com", "Passw0rd!")), ErrorCode.ACCOUNT_LOCKED);
+        expectCode(() -> service.login(new LoginRequest("user@example.com", "Passw0rd!"), "UA", "ip").body(), ErrorCode.ACCOUNT_LOCKED);
         verify(jwtProvider, never()).createToken(any());
     }
 
@@ -196,7 +209,7 @@ class AuthServiceTest {
         when(passwordEncoder.matches("wrong", "HASH")).thenReturn(false);
 
         for (int i = 0; i < 12; i++) {
-            expectCode(() -> service.login(new LoginRequest("user@example.com", "wrong")), ErrorCode.LOGIN_FAILED);
+            expectCode(() -> service.login(new LoginRequest("user@example.com", "wrong"), "UA", "ip").body(), ErrorCode.LOGIN_FAILED);
         }
         assertThat(user.getStatus()).isEqualTo(UserStatus.PENDING);
     }
@@ -207,13 +220,13 @@ class AuthServiceTest {
         when(passwordEncoder.matches("Passw0rd!", "HASH")).thenReturn(true);
 
         givenUser(storedUser(UserStatus.PENDING, false));
-        expectCode(() -> service.login(new LoginRequest("user@example.com", "Passw0rd!")), ErrorCode.EMAIL_NOT_VERIFIED);
+        expectCode(() -> service.login(new LoginRequest("user@example.com", "Passw0rd!"), "UA", "ip").body(), ErrorCode.EMAIL_NOT_VERIFIED);
 
         givenUser(storedUser(UserStatus.PENDING, true));
-        expectCode(() -> service.login(new LoginRequest("user@example.com", "Passw0rd!")), ErrorCode.ACCOUNT_PENDING);
+        expectCode(() -> service.login(new LoginRequest("user@example.com", "Passw0rd!"), "UA", "ip").body(), ErrorCode.ACCOUNT_PENDING);
 
         givenUser(storedUser(UserStatus.INACTIVE, true));
-        expectCode(() -> service.login(new LoginRequest("user@example.com", "Passw0rd!")), ErrorCode.ACCOUNT_INACTIVE);
+        expectCode(() -> service.login(new LoginRequest("user@example.com", "Passw0rd!"), "UA", "ip").body(), ErrorCode.ACCOUNT_INACTIVE);
 
         verify(jwtProvider, never()).createToken(any());
     }
@@ -227,7 +240,7 @@ class AuthServiceTest {
         when(passwordEncoder.matches("Admin1234!", "HASH")).thenReturn(true);
         when(jwtProvider.createToken(1L)).thenReturn("JWT");
 
-        TokenResponse res = service.login(new LoginRequest("user@example.com", "Admin1234!"));
+        TokenResponse res = service.login(new LoginRequest("user@example.com", "Admin1234!"), "UA", "ip").body();
 
         assertThat(res.mustChangePassword()).isTrue();
     }
@@ -284,5 +297,91 @@ class AuthServiceTest {
 
         expectCode(() -> service.resendVerification("none@example.com", "ip"), ErrorCode.TOO_MANY_REQUESTS);
         verify(userRepository, never()).findByEmail(any());
+    }
+
+    @Test
+    @DisplayName("10번째 실패로 잠기면 그 사용자의 로그인 세션도 모두 끊는다")
+    void login_lockRevokesSessions() {
+        User user = storedUser(UserStatus.ACTIVE, true);
+        ReflectionTestUtils.setField(user, "failedLoginCount", 9);
+        givenUser(user);
+        when(passwordEncoder.matches("wrong", "HASH")).thenReturn(false);
+
+        expectCode(() -> service.login(new LoginRequest("user@example.com", "wrong"), "UA", "ip"), ErrorCode.ACCOUNT_LOCKED);
+        verify(refreshTokenService).revokeAll(7L, RevokeReason.LOCKED);
+    }
+
+    // ---------- refresh / logout ----------
+
+    @Test
+    @DisplayName("재발급: 회전한 새 refresh token 과 새 access token")
+    void refresh_ok() {
+        when(refreshTokenService.rotate("OLD", "UA", "ip"))
+                .thenReturn(new RefreshTokenService.Issued(7L, "NEW", false, Duration.ofMinutes(30)));
+        when(userRepository.findById(7L)).thenReturn(Optional.of(storedUser(UserStatus.ACTIVE, true)));
+        when(jwtProvider.createToken(7L)).thenReturn("JWT2");
+
+        LoginResult r = service.refresh("OLD", "UA", "ip");
+
+        assertThat(r.body().accessToken()).isEqualTo("JWT2");
+        assertThat(r.refresh().rawToken()).isEqualTo("NEW");
+    }
+
+    @Test
+    @DisplayName("재발급: 쿠키 없음 → UNAUTHORIZED, 그사이 잠긴 계정 → 세션 모두 끊고 UNAUTHORIZED")
+    void refresh_rejects() {
+        expectCode(() -> service.refresh(null, "UA", "ip"), ErrorCode.UNAUTHORIZED);
+
+        when(refreshTokenService.rotate("OLD", "UA", "ip"))
+                .thenReturn(new RefreshTokenService.Issued(7L, "NEW", false, Duration.ofMinutes(30)));
+        when(userRepository.findById(7L)).thenReturn(Optional.of(storedUser(UserStatus.LOCKED, true)));
+
+        expectCode(() -> service.refresh("OLD", "UA", "ip"), ErrorCode.UNAUTHORIZED);
+        verify(refreshTokenService).revokeAll(7L, RevokeReason.LOCKED);
+        verify(jwtProvider, never()).createToken(any());
+    }
+
+    @Test
+    @DisplayName("로그아웃: 쿠키가 있으면 그 세션만 LOGOUT 으로 끊고, 없으면 아무것도 안 한다")
+    void logout() {
+        service.logout("RT");
+        verify(refreshTokenService).revoke("RT", RevokeReason.LOGOUT);
+
+        service.logout(null);
+        verify(refreshTokenService, org.mockito.Mockito.times(1)).revoke(any(), any());
+    }
+
+    // ---------- forgot / reset ----------
+
+    @Test
+    @DisplayName("비밀번호 찾기: 계정이 있으면 재설정 메일, 없거나 중지 계정이면 조용히 넘어간다")
+    void forgot() {
+        givenUser(storedUser(UserStatus.LOCKED, true));
+        when(tokenService.issue(7L, TokenPurpose.PASSWORD_RESET, null, "ip"))
+                .thenReturn(Optional.of(new AccountTokenService.Issued("RESET", 10)));
+        service.forgotPassword("user@example.com", "ip");
+        verify(mailSender).sendPasswordReset("user@example.com", "홍길동", "http://web.test/reset-password?token=RESET", 10);
+
+        when(userRepository.findByEmail("none@example.com")).thenReturn(Optional.empty());
+        service.forgotPassword("none@example.com", "ip");
+        when(userRepository.findByEmail("off@example.com")).thenReturn(Optional.of(storedUser(UserStatus.INACTIVE, true)));
+        service.forgotPassword("off@example.com", "ip");
+
+        verify(tokenService, org.mockito.Mockito.times(1)).issue(any(), eq(TokenPurpose.PASSWORD_RESET), any(), any());
+        verify(tokenService, org.mockito.Mockito.times(3)).checkIpLimit("ip");
+    }
+
+    @Test
+    @DisplayName("재설정: 토큰을 쓰고 공통 비밀번호 변경 규칙을 적용, 메일 링크로 이메일 소유도 확인된 것으로 본다")
+    void reset() {
+        User user = storedUser(UserStatus.PENDING, false);
+        AccountToken token = new AccountToken(7L, TokenPurpose.PASSWORD_RESET, "h".repeat(64), null, null, now, now.plusMinutes(10));
+        when(tokenService.consume("RESET", TokenPurpose.PASSWORD_RESET)).thenReturn(token);
+        when(userRepository.findById(7L)).thenReturn(Optional.of(user));
+
+        service.resetPassword("RESET", "NewPassw0rd!");
+
+        verify(passwordService).change(user, "NewPassw0rd!");
+        assertThat(user.isEmailVerified()).isTrue();
     }
 }
