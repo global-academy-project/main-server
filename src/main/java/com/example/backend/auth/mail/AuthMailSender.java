@@ -9,4 +9,7 @@ public interface AuthMailSender {
 
     /** 이메일 인증 링크 (웹 /verify-email?token=) */
     void sendEmailVerification(String to, String name, String link, long validMinutes);
+
+    /** 비밀번호 재설정 링크 (웹 /reset-password?token=) */
+    void sendPasswordReset(String to, String name, String link, long validMinutes);
 }

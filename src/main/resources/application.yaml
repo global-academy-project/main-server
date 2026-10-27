@@ -39,13 +39,16 @@ spring:
 app:
   jwt:
     secret: ${JWT_SECRET}
-    # 2단계(refresh token)에서 900(15분)으로 줄인다. 지금 줄이면 15분마다 로그아웃된다
-    expiration-seconds: 3600
+    expiration-seconds: 900
   auth:
     max-failed-login: 10          # 이 횟수만큼 틀리면 잠금
     mail-token-minutes: 10        # 메일 링크 유효 시간 (인증, 비밀번호 재설정)
     mail-max-per-user-hour: 5     # 한 사람에게 1시간에 보낼 수 있는 메일 수
     mail-max-per-ip-hour: 30      # 같은 IP 1시간 요청 수 (회사는 여러 명이 같은 IP)
+    refresh-remember-days: 365    # 로그인 유지 체크: 쓸 때마다 다시 365일 → 사실상 로그아웃 전까지
+    refresh-short-minutes: 30     # 체크 안 함: 30분 동안 안 쓰면 끝
+    password-history-count: 3     # 최근 비밀번호 3개는 다시 못 씀
+    cookie-secure: ${COOKIE_SECURE:false}   # https 운영에서 true
   web:
     # 메일 링크가 가리킬 웹 주소
     base-url: ${WEB_BASE_URL:http://localhost:5173}

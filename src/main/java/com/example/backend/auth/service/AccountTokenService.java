@@ -24,7 +24,8 @@ import java.util.Optional;
  *  - 같은 IP 1시간에 app.auth.mail-max-per-ip-hour 회 (기본 30). 회사 안에서는 여러 사람이 같은 IP를 쓰므로 넉넉하게
  */
 @Service
-@Transactional(propagation = Propagation.MANDATORY)
+// 여기서 던진 BusinessException 이 트랜잭션을 rollback-only 로 만들지 않게 한다 (롤백 여부는 호출한 쪽이 정함)
+@Transactional(propagation = Propagation.MANDATORY, noRollbackFor = BusinessException.class)
 public class AccountTokenService {
 
     /** 발급 결과: 메일에 넣을 원문과 유효 시간 */

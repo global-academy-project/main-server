@@ -16,4 +16,9 @@ public class LoggingAuthMailSender implements AuthMailSender {
     public void sendEmailVerification(String to, String name, String link, long validMinutes) {
         log.info("[메일-개발모드] 이메일 인증 to={} ({}분 유효) link={}", to, validMinutes, link);
     }
+
+    @Override
+    public void sendPasswordReset(String to, String name, String link, long validMinutes) {
+        log.info("[메일-개발모드] 비밀번호 재설정 to={} ({}분 유효) link={}", to, validMinutes, link);
+    }
 }
