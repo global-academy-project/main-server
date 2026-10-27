@@ -23,6 +23,8 @@ dependencies {
     // DB 스키마 마이그레이션 (src/main/resources/db/migration). MySQL은 flyway-mysql 모듈이 따로 필요
     implementation 'org.springframework.boot:spring-boot-starter-flyway'
     implementation 'org.flywaydb:flyway-mysql'
+    // 인증 메일 (app.mail.mode=smtp 일 때 사용)
+    implementation 'org.springframework.boot:spring-boot-starter-mail'
     implementation 'org.springframework.boot:spring-boot-starter-security'
     implementation 'org.springframework.boot:spring-boot-starter-validation'
     implementation 'org.springframework.boot:spring-boot-starter-webmvc'

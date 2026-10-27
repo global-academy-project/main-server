@@ -75,6 +75,28 @@ class SignupRequestValidationTest {
         assertThat(invalidFields(new SignupRequest(null, null, null))).containsExactlyInAnyOrder("email", "password", "name");
     }
 
+    @ParameterizedTest(name = "전화번호 \"{0}\" 허용")
+    @ValueSource(strings = {"", "01012345678", "0212345678", "021234567"})
+    @DisplayName("전화번호: 비워도 되고, 숫자만 0으로 시작하는 9~11자리는 허용")
+    void phone_valid(String phone) {
+        assertThat(invalidFields(new SignupRequest("user@example.com", "Passw0rd!", "홍길동", phone, null, null))).isEmpty();
+    }
+
+    @ParameterizedTest(name = "전화번호 \"{0}\" 거부")
+    @ValueSource(strings = {"010-1234-5678", "1012345678", "01012", "010123456789", "abc"})
+    @DisplayName("전화번호: 하이픈·0 아닌 시작·자릿수 틀림은 거부 (DB ck_users_phone 과 같은 규칙)")
+    void phone_invalid(String phone) {
+        assertThat(invalidFields(new SignupRequest("user@example.com", "Passw0rd!", "홍길동", phone, null, null)))
+                .containsExactly("phone");
+    }
+
+    @Test
+    @DisplayName("부서 100자·직책 50자 초과는 거부")
+    void department_jobTitle_length() {
+        assertThat(invalidFields(new SignupRequest("user@example.com", "Passw0rd!", "홍길동", null, "가".repeat(101), "가".repeat(51))))
+                .containsExactlyInAnyOrder("department", "jobTitle");
+    }
+
     @Test
     @DisplayName("로그인 요청: 이메일/비밀번호가 비어 있으면 거부")
     void login_blank() {
