@@ -17,7 +17,7 @@ public class JwtProvider {
     private final long expirationSeconds;
 
     public JwtProvider(@Value("${app.jwt.secret}") String secret,
-                       @Value("${app.jwt.expiration-seconds:3600}") long expirationSeconds) {
+                       @Value("${app.jwt.expiration-seconds}") long expirationSeconds) {
         byte[] bytes = secret.getBytes(StandardCharsets.UTF_8);
         if (bytes.length < 32) {
             throw new IllegalStateException("app.jwt.secret(JWT_SECRET)은 32바이트 이상이어야 합니다.");
