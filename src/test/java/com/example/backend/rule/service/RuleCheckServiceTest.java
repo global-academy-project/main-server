@@ -12,6 +12,9 @@ import com.example.backend.rule.repository.RuleRepository;
 import com.example.backend.rule.repository.RuleViolationRepository;
 import com.example.backend.site.entity.Site;
 import com.example.backend.site.repository.SiteRepository;
+import com.example.backend.site.service.SiteAccessService;
+import com.example.backend.user.entity.User;
+import com.example.backend.user.repository.UserRepository;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -49,6 +52,8 @@ class RuleCheckServiceTest {
     private RuleViolationRepository violationRepository;
     private SiteRepository siteRepository;
     private RuleTargetLookup targetLookup;
+    private UserRepository userRepository;
+    private SiteAccessService siteAccessService;
     private RuleCheckService service;
 
     @BeforeEach
@@ -58,10 +63,12 @@ class RuleCheckServiceTest {
         violationRepository = mock(RuleViolationRepository.class);
         siteRepository = mock(SiteRepository.class);
         targetLookup = mock(RuleTargetLookup.class);
+        userRepository = mock(UserRepository.class);
+        siteAccessService = mock(SiteAccessService.class);
         JsonMapper jsonMapper = JsonMapper.builder().build();
         Clock clock = Clock.fixed(Instant.parse("2026-10-28T01:00:00Z"), ZoneId.of("Asia/Seoul"));
         service = new RuleCheckService(ruleRepository, evaluationRepository, violationRepository, siteRepository,
-                targetLookup, new RuleEvaluator(jsonMapper), jsonMapper, clock);
+                targetLookup, new RuleEvaluator(jsonMapper), jsonMapper, clock, userRepository, siteAccessService);
 
         when(siteRepository.findById(1L)).thenReturn(Optional.of(site(1L, true)));
         when(ruleRepository.findByEnabledTrueAndWorkTypeInOrderByRuleCodeAsc(List.of("CONFINED", "ALL"))).thenReturn(List.of(
@@ -193,5 +200,38 @@ class RuleCheckServiceTest {
         assertThat(r.result()).isEqualTo(EvaluationResult.PASS);
         assertThat(r.rulesApplied()).isZero();
         verify(ruleRepository).findByEnabledTrueAndWorkTypeInOrderByRuleCodeAsc(List.of("HOT", "ALL"));
+    }
+
+    @Test
+    @DisplayName("웹: 그 현장 권한이 있으면 판정한다")
+    void web_withSiteAccess_checks() {
+        User user = new User("w@example.com", "HASH", "작성자");
+        ReflectionTestUtils.setField(user, "id", 7L);
+        when(userRepository.findById(7L)).thenReturn(Optional.of(user));
+        when(siteAccessService.canAccess(user, 1L)).thenReturn(true);
+
+        RuleCheckResult r = service.checkForUser(7L, new RuleCheckCommand(1L, WorkType.CONFINED, null, null, null, LOW_O2));
+
+        assertThat(r.result()).isEqualTo(EvaluationResult.BLOCK);
+    }
+
+    @Test
+    @DisplayName("웹: 그 현장 권한이 없으면 SITE_NOT_ALLOWED, 판정하지 않는다")
+    void web_withoutSiteAccess_forbidden() {
+        User user = new User("w@example.com", "HASH", "작성자");
+        ReflectionTestUtils.setField(user, "id", 7L);
+        when(userRepository.findById(7L)).thenReturn(Optional.of(user));
+        when(siteAccessService.canAccess(user, 1L)).thenReturn(false);
+
+        expectCode(() -> service.checkForUser(7L, new RuleCheckCommand(1L, WorkType.CONFINED, null, null, null, LOW_O2)),
+                ErrorCode.SITE_NOT_ALLOWED);
+        verify(ruleRepository, never()).findByEnabledTrueAndWorkTypeInOrderByRuleCodeAsc(any());
+    }
+
+    @Test
+    @DisplayName("웹: 로그인 정보가 없으면 UNAUTHORIZED")
+    void web_noUser_unauthorized() {
+        expectCode(() -> service.checkForUser(null, new RuleCheckCommand(1L, WorkType.CONFINED, null, null, null, LOW_O2)),
+                ErrorCode.UNAUTHORIZED);
     }
 }

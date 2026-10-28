@@ -1,11 +1,13 @@
 package com.example.backend.config;
 
+import com.example.backend.auth.internal.InternalTokenFilter;
 import com.example.backend.auth.jwt.AccountStateFilter;
 import com.example.backend.auth.jwt.JwtAuthenticationEntryPoint;
 import com.example.backend.auth.jwt.JwtAuthenticationFilter;
 import com.example.backend.auth.jwt.JwtProvider;
 import com.example.backend.common.exception.ErrorCode;
 import com.example.backend.user.repository.UserRepository;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
@@ -25,7 +27,8 @@ public class SecurityConfig {
     }
 
     @Bean
-    SecurityFilterChain filterChain(HttpSecurity http, JwtProvider jwtProvider, UserRepository userRepository) throws Exception {
+    SecurityFilterChain filterChain(HttpSecurity http, JwtProvider jwtProvider, UserRepository userRepository,
+                                    @Value("${app.internal.token}") String internalToken) throws Exception {
         http.csrf(AbstractHttpConfigurer::disable)
                 .formLogin(AbstractHttpConfigurer::disable)
                 .httpBasic(AbstractHttpConfigurer::disable)
@@ -34,6 +37,8 @@ public class SecurityConfig {
                         // 비밀번호 변경은 /auth 아래지만 로그인 필요 (만료 토큰이면 TOKEN_EXPIRED 로 응답되게)
                         .requestMatchers("/api/v1/auth/password/change").authenticated()
                         .requestMatchers("/api/v1/auth/**", "/swagger-ui/**", "/swagger-ui.html", "/v3/api-docs/**").permitAll()
+                        // AI 서버 내부 API: JWT 대신 InternalTokenFilter 가 X-Internal-Token 을 확인한다
+                        .requestMatchers("/internal/**").permitAll()
                         .requestMatchers("/api/v1/admin/**").hasRole("ADMIN")
                         .anyRequest().authenticated())
                 .exceptionHandling(e -> e
@@ -45,6 +50,7 @@ public class SecurityConfig {
                             response.getWriter().write("{\"success\":false,\"error\":{\"code\":\"FORBIDDEN\",\"message\":\""
                                     + ErrorCode.FORBIDDEN.getDefaultMessage() + "\",\"details\":[]}}");
                         }))
+                .addFilterBefore(new InternalTokenFilter(internalToken), UsernamePasswordAuthenticationFilter.class)
                 .addFilterBefore(new JwtAuthenticationFilter(jwtProvider), UsernamePasswordAuthenticationFilter.class)
                 .addFilterAfter(new AccountStateFilter(userRepository), JwtAuthenticationFilter.class);
         return http.build();
