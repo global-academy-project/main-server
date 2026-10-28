@@ -1,0 +1,79 @@
+### 화기 작업허가 흐름 확인 (IntelliJ HTTP Client). 위에서부터 순서대로.
+### 작성 → 측정(LEL 12) → 판정 BLOCK → 승인 요청 거부 → 재측정(LEL 3) → 판정 PASS → 승인 요청
+@host = http://localhost:8080
+
+### 1. 관리자 로그인 (15분 지나면 다시)
+POST {{host}}/api/v1/auth/login
+Content-Type: application/json
+
+{"email": "admin@test.com", "password": "Admin5678!", "rememberMe": false}
+
+> {% client.global.set("token", response.body.data.accessToken); %}
+
+### 2. 작업 등록 (siteId 는 /users/me 의 현장)
+POST {{host}}/api/v1/works
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{"siteId": 1, "workDate": "2026-10-29", "title": "R-201 하부 배관 플랜지 볼트 교체",
+ "description": "고착 시 그라인더 절단, 옆 T-105 탱크에 톨루엔", "workType": "HOT",
+ "startAt": "2026-10-29T13:00:00", "endAt": "2026-10-29T15:00:00", "workerCount": 3}
+
+> {% client.global.set("workId", response.body.data.workId); %}
+
+### 3. 화기 허가서 작성 → DRAFT, 허가번호 HOT-20261029-00N
+POST {{host}}/api/v1/permits
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{"workId": {{workId}}, "permitType": "HOT",
+ "validFrom": "2026-10-29T13:00:00", "validTo": "2026-10-29T15:00:00",
+ "watcherName": "김감시", "supervisorName": "이반장",
+ "form": {"extinguisher_ready": true, "spark_prevention": true, "flammable_vapor_removed": true}}
+
+> {% client.global.set("permitId", response.body.data.permitId); %}
+
+### 4. 판정 없이 승인 요청 → 409 INVALID_STATE "규칙 판정을 먼저"
+POST {{host}}/api/v1/permits/{{permitId}}/submit
+Authorization: Bearer {{token}}
+
+### 5. 측정: 가연성 가스 12 %LEL
+POST {{host}}/api/v1/permits/{{permitId}}/measurements
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{"items": [{"item": "LEL", "value": 12, "measuredAt": "2026-10-29T12:00:00", "location": "플랜지 주변", "measurerName": "박측정"}]}
+
+### 6. 판정 → BLOCK (HOT_LEL_MAX), status BLOCKED, canSubmit false
+POST {{host}}/api/v1/permits/{{permitId}}/check
+Authorization: Bearer {{token}}
+
+### 7. 승인 요청 → 409 INVALID_STATE "BLOCK 이라 승인 요청할 수 없습니다"
+POST {{host}}/api/v1/permits/{{permitId}}/submit
+Authorization: Bearer {{token}}
+
+### 8. 재측정: 3 %LEL → status DRAFT, lastEvaluation null, 두 번째 측정 remeasure true
+POST {{host}}/api/v1/permits/{{permitId}}/measurements
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{"items": [{"item": "LEL", "value": 3, "measuredAt": "2026-10-29T12:30:00", "location": "플랜지 주변", "measurerName": "박측정"}]}
+
+### 9. 다시 판정 → PASS, canSubmit true
+POST {{host}}/api/v1/permits/{{permitId}}/check
+Authorization: Bearer {{token}}
+
+### 10. 승인 요청 → PENDING
+POST {{host}}/api/v1/permits/{{permitId}}/submit
+Authorization: Bearer {{token}}
+
+### 11. 승인 요청 뒤 측정 추가 → 409 INVALID_STATE "승인 요청된 허가서는 고칠 수 없습니다"
+POST {{host}}/api/v1/permits/{{permitId}}/measurements
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{"items": [{"item": "LEL", "value": 1}]}
+
+### 12. 상세 조회 (측정 2건, 최근 판정 PASS)
+GET {{host}}/api/v1/permits/{{permitId}}
+Authorization: Bearer {{token}}
