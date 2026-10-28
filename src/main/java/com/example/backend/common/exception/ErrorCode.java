@@ -41,7 +41,9 @@ public enum ErrorCode {
     ALREADY_PROCESSING(HttpStatus.CONFLICT, "처리 중인 문서입니다."),
     FILE_TOO_LARGE(HttpStatus.CONTENT_TOO_LARGE, "파일 크기는 20MB 이하여야 합니다."),
     INTERNAL_ERROR(HttpStatus.INTERNAL_SERVER_ERROR, "서버 오류가 발생했습니다."),
-    OCR_SERVER_ERROR(HttpStatus.BAD_GATEWAY, "OCR 서버 호출에 실패했습니다.");
+    OCR_SERVER_ERROR(HttpStatus.BAD_GATEWAY, "OCR 서버 호출에 실패했습니다."),
+    WORK_NOT_FOUND(HttpStatus.NOT_FOUND, "작업을 찾을 수 없습니다."),
+    PERMIT_NOT_FOUND(HttpStatus.NOT_FOUND, "작업허가서를 찾을 수 없습니다.");
 
     private final HttpStatus status;
     private final String defaultMessage;
