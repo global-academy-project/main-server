@@ -30,6 +30,7 @@ public enum ErrorCode {
     INVALID_STATE(HttpStatus.CONFLICT, "현재 상태에서는 할 수 없는 작업입니다."),
     USER_NOT_FOUND(HttpStatus.NOT_FOUND, "사용자를 찾을 수 없습니다."),
     SITE_NOT_FOUND(HttpStatus.NOT_FOUND, "현장을 찾을 수 없습니다."),
+    NOT_FOUND(HttpStatus.NOT_FOUND, "대상을 찾을 수 없습니다."),
     SITE_NOT_ALLOWED(HttpStatus.FORBIDDEN, "권한이 없는 현장입니다."),
 
     DOCUMENT_NOT_FOUND(HttpStatus.NOT_FOUND, "문서를 찾을 수 없습니다."),
