@@ -13,8 +13,8 @@ import java.util.List;
  */
 public record ApproveRequest(
         UserRole role,
-        @NotNull @Valid
-        List<SiteGrant> sites
+        @NotNull
+        List<@Valid SiteGrant> sites
 ) {
     public UserRole roleOrDefault() {
         return role == null ? UserRole.MEMBER : role;

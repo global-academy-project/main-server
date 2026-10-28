@@ -6,7 +6,7 @@
 POST {{host}}/api/v1/auth/login
 Content-Type: application/json
 
-{"email": "admin@test.com", "password": "Admin1234!", "rememberMe": true}
+{"email": "admin@test.com", "password": "Admin5678!", "rememberMe": true}
 
 > {% client.global.set("adminToken", response.body.data.accessToken); %}
 
@@ -24,7 +24,7 @@ GET {{host}}/api/v1/admin/users?status=PENDING
 Authorization: Bearer {{adminToken}}
 
 ### 4. 승인 (userId 와 siteId 를 바꿔서)
-POST {{host}}/api/v1/admin/users/3/approve
+POST {{host}}/api/v1/admin/users/4/approve
 Authorization: Bearer {{adminToken}}
 Content-Type: application/json
 
