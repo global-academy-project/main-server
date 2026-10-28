@@ -29,7 +29,7 @@ import java.util.TreeSet;
  *  - 수치 규칙(RANGE, GTE, GT, LTE, LT, EQ)인데 값이 없으면 위반으로 본다 (값을 빼먹어서 통과되지 않게)
  *  - 수치 규칙에 숫자가 아닌 값(문자열 "17.5" 포함)이 오면 INVALID_REQUEST
  *  - REQUIRED: null, 빈 문자열, 빈 목록이면 위반
- *  - IN: allowed 목록 중 하나여야 함 (값이 없으면 위반)
+ *  - IN: allowed 목록 중 하나여야 함 (값이 없으면 위반). 예/아니오 확인 항목은 allowed = [true]
  *  - 결과는 위반 중 가장 무거운 것: BLOCK > WARN > (없으면) PASS
  */
 @Component
@@ -78,7 +78,7 @@ public class RuleEvaluator {
         }
         if (op == RuleOperator.IN) {
             if (isBlank(raw)) {
-                return missing(rule, expected);
+                return violation(rule, null, expected);   // 체크 항목이 비었으면 규칙 문구 그대로 (근거 조항과 함께)
             }
             String actual = text(raw);
             boolean ok = allowedValues(rule).stream().anyMatch(a -> sameValue(text(a), actual));
@@ -143,11 +143,21 @@ public class RuleEvaluator {
             case LTE -> plain(rule.getMaxValue()) + " 이하";
             case LT -> plain(rule.getMaxValue()) + " 미만";
             case EQ -> plain(rule.getMinValue());
-            case IN -> String.join(", ", allowedValues(rule).stream().map(RuleEvaluator::text).toList()) + " 중 하나";
+            case IN -> inText(allowedValues(rule));
             case REQUIRED -> "입력 필요";
         };
-        String unit = unitLabel(rule.getUnit());
+        // 단위는 수치 기준에만 붙인다 ("입력 필요 (%LEL)" 처럼 어색해지지 않게)
+        boolean numeric = rule.getOperator() != RuleOperator.REQUIRED && rule.getOperator() != RuleOperator.IN;
+        String unit = numeric ? unitLabel(rule.getUnit()) : null;
         return unit == null ? text : text + " (" + unit + ")";
+    }
+
+    /** 예/아니오 확인 항목([true])은 "확인 필요", 그 밖에는 "A, B 중 하나" */
+    private static String inText(List<Object> allowed) {
+        if (allowed.size() == 1 && Boolean.TRUE.equals(allowed.get(0))) {
+            return "확인 필요";
+        }
+        return String.join(", ", allowed.stream().map(RuleEvaluator::text).toList()) + " 중 하나";
     }
 
     private static String unitLabel(String unit) {

@@ -53,12 +53,12 @@ class RuleDbIntegrationTest {
     }
 
     @Test
-    @DisplayName("시드의 밀폐공간 규칙 4개가 값 그대로 읽힌다")
+    @DisplayName("시드의 밀폐공간 규칙(산소·탄산가스·일산화탄소·황화수소·가연성 가스)이 값 그대로 읽힌다")
     void seedRulesAreMapped() {
         List<Rule> rules = ruleRepository.findByEnabledTrueAndWorkTypeInOrderByRuleCodeAsc(List.of("CONFINED", "ALL"));
 
         assertThat(rules).extracting(Rule::getRuleCode)
-                .contains("CONFINED_CO2_MAX", "CONFINED_CO_MAX", "CONFINED_H2S_MAX", "CONFINED_O2_RANGE");
+                .contains("CONFINED_CO2_MAX", "CONFINED_CO_MAX", "CONFINED_H2S_MAX", "CONFINED_LEL_MAX", "CONFINED_O2_RANGE");
         Rule o2 = rules.stream().filter(r -> r.getRuleCode().equals("CONFINED_O2_RANGE")).findFirst().orElseThrow();
         assertThat(o2.getOperator()).isEqualTo(RuleOperator.RANGE);
         assertThat(o2.getMinValue()).isEqualByComparingTo(new BigDecimal("18"));
@@ -77,7 +77,7 @@ class RuleDbIntegrationTest {
         long before = evaluationRepository.count();
 
         RuleCheckResult r = ruleCheckService.check(new RuleCheckCommand(siteId, WorkType.CONFINED, null, null, null,
-                Map.of("measurement", Map.of("O2", 17.5, "CO2", 0.8, "CO", 5, "H2S", 0))));
+                Map.of("measurement", Map.of("O2", 17.5, "CO2", 0.8, "CO", 5, "H2S", 0, "LEL", 0))));
 
         assertThat(r.result()).isEqualTo(EvaluationResult.BLOCK);
         assertThat(r.evaluationId()).isNull();

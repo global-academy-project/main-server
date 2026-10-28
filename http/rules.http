@@ -20,7 +20,7 @@ Authorization: Bearer {{adminToken}}
 Content-Type: application/json
 
 {"siteId": 1, "workType": "CONFINED",
- "input": {"measurement": {"O2": 17.5, "CO2": 0.8, "CO": 5, "H2S": 0}}}
+ "input": {"measurement": {"O2": 17.5, "CO2": 0.8, "CO": 5, "H2S": 0, "LEL": 0}}}
 
 ### 4. [웹] 모두 정상 → PASS, violations []
 POST {{host}}/api/v1/rules/check
@@ -28,7 +28,7 @@ Authorization: Bearer {{adminToken}}
 Content-Type: application/json
 
 {"siteId": 1, "workType": "CONFINED",
- "input": {"measurement": {"O2": 20.9, "CO2": 0.04, "CO": 0, "H2S": 0}}}
+ "input": {"measurement": {"O2": 20.9, "CO2": 0.04, "CO": 0, "H2S": 0, "LEL": 0}}}
 
 ### 5. [웹] 측정값 누락(CO 없음) + 이름 오타(O3) → BLOCK "측정값이 없습니다.", unusedFields ["measurement.O3"]
 POST {{host}}/api/v1/rules/check
@@ -36,7 +36,7 @@ Authorization: Bearer {{adminToken}}
 Content-Type: application/json
 
 {"siteId": 1, "workType": "CONFINED",
- "input": {"measurement": {"O2": 20.9, "CO2": 0.04, "O3": 1, "H2S": 0}}}
+ "input": {"measurement": {"O2": 20.9, "CO2": 0.04, "O3": 1, "H2S": 0, "LEL": 0}}}
 
 ### 6. [웹] 측정값이 문자열 → 400 INVALID_REQUEST
 POST {{host}}/api/v1/rules/check
@@ -72,7 +72,7 @@ X-Internal-Token: {{$processEnv INTERNAL_API_TOKEN}}
 Content-Type: application/json
 
 {"siteId": 1, "workType": "CONFINED",
- "input": {"measurement": {"O2": 17.5, "CO2": 0.8, "CO": 5, "H2S": 0}}}
+ "input": {"measurement": {"O2": 17.5, "CO2": 0.8, "CO": 5, "H2S": 0, "LEL": 0}}}
 
 ### 11. [내부] 토큰 틀림 → 401 UNAUTHORIZED
 POST {{host}}/internal/v1/tools/check_rules
@@ -94,3 +94,36 @@ X-Internal-Token: {{$processEnv INTERNAL_API_TOKEN}}
 Content-Type: application/json
 
 {"siteId": 1, "workType": "CONFINED", "agentRunId": 999999, "input": {"measurement": {"O2": 20.9}}}
+
+### 14. [웹] 화기: 아무 조치도 없음 → BLOCK 5건 (가연성 가스 측정값 없음, 감시자, 소화기, 비산방지, 인화성 증기)
+POST {{host}}/api/v1/rules/check
+Authorization: Bearer {{adminToken}}
+Content-Type: application/json
+
+{"siteId": 1, "workType": "HOT", "input": {"form": {}}}
+
+### 15. [웹] 화기: 모든 조치 + 가연성 가스 3 %LEL → PASS
+POST {{host}}/api/v1/rules/check
+Authorization: Bearer {{adminToken}}
+Content-Type: application/json
+
+{"siteId": 1, "workType": "HOT",
+ "input": {"measurement": {"LEL": 3},
+           "form": {"watcher_name": "김감시", "extinguisher_ready": true, "spark_prevention": true, "flammable_vapor_removed": true}}}
+
+### 16. [웹] 화기: 가연성 가스 10 %LEL → BLOCK "폭발하한의 10%에 도달" (화기작업 중단)
+POST {{host}}/api/v1/rules/check
+Authorization: Bearer {{adminToken}}
+Content-Type: application/json
+
+{"siteId": 1, "workType": "HOT",
+ "input": {"measurement": {"LEL": 10},
+           "form": {"watcher_name": "김감시", "extinguisher_ready": true, "spark_prevention": true, "flammable_vapor_removed": true}}}
+
+### 17. [웹] 밀폐공간: 다른 값은 정상, 가연성 가스 12 %LEL → BLOCK (H-80 기준 10% 미만)
+POST {{host}}/api/v1/rules/check
+Authorization: Bearer {{adminToken}}
+Content-Type: application/json
+
+{"siteId": 1, "workType": "CONFINED",
+ "input": {"measurement": {"O2": 20.9, "CO2": 0.04, "CO": 0, "H2S": 0, "LEL": 12}}}
