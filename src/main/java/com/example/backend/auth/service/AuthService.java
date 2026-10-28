@@ -21,8 +21,7 @@ import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
-import org.springframework.transaction.support.TransactionSynchronization;
-import org.springframework.transaction.support.TransactionSynchronizationManager;
+import com.example.backend.common.util.AfterCommit;
 
 import java.time.Clock;
 import java.time.LocalDateTime;
@@ -66,6 +65,7 @@ public class AuthService {
     /** 가입: PENDING 으로 저장하고 인증 메일을 보낸다. 바로 로그인은 안 된다 (이메일 인증 + 관리자 승인 후). */
     @Transactional
     public UserResponse signup(SignupRequest request, String clientIp) {
+        tokenService.checkIpLimit(clientIp);
         String email = normalize(request.email());
         if (userRepository.existsByEmail(email)) {
             throw new BusinessException(ErrorCode.EMAIL_DUPLICATED);
@@ -191,7 +191,7 @@ public class AuthService {
                             String link = webLinks.resetPassword(issued.rawToken());
                             String to = u.getEmail();
                             String name = u.getName();
-                            afterCommit(() -> mailSender.sendPasswordReset(to, name, link, issued.validMinutes()));
+                            AfterCommit.run(() -> mailSender.sendPasswordReset(to, name, link, issued.validMinutes()));
                         }));
     }
 
@@ -261,22 +261,10 @@ public class AuthService {
             String to = user.getEmail();
             String name = user.getName();
             // 메일은 DB에 토큰이 확실히 저장된 뒤(커밋 후)에 보낸다
-            afterCommit(() -> mailSender.sendEmailVerification(to, name, link, issued.validMinutes()));
+            AfterCommit.run(() -> mailSender.sendEmailVerification(to, name, link, issued.validMinutes()));
         });
     }
 
-    private static void afterCommit(Runnable action) {
-        if (TransactionSynchronizationManager.isSynchronizationActive()) {
-            TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
-                @Override
-                public void afterCommit() {
-                    action.run();
-                }
-            });
-        } else {
-            action.run();
-        }
-    }
 
     private String normalize(String email) {
         return email.trim().toLowerCase(Locale.ROOT);
