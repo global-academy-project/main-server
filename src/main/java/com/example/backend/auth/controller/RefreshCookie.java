@@ -24,7 +24,7 @@ public class RefreshCookie {
 
     private final boolean secure;
 
-    public RefreshCookie(@Value("${app.auth.cookie-secure:false}") boolean secure) {
+    public RefreshCookie(@Value("${app.auth.cookie-secure}") boolean secure) {
         this.secure = secure;
     }
 

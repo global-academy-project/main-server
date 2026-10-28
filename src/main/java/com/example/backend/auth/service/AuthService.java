@@ -8,6 +8,7 @@ import com.example.backend.auth.entity.RevokeReason;
 import com.example.backend.auth.entity.TokenPurpose;
 import com.example.backend.auth.jwt.JwtProvider;
 import com.example.backend.auth.mail.AuthMailSender;
+import com.example.backend.auth.mail.WebLinks;
 import com.example.backend.common.exception.BusinessException;
 import com.example.backend.common.exception.ErrorCode;
 import com.example.backend.user.dto.UserResponse;
@@ -39,15 +40,14 @@ public class AuthService {
     private final AuthMailSender mailSender;
     private final Clock clock;
     private final int maxFailedLogin;
-    private final String webBaseUrl;
+    private final WebLinks webLinks;
     /** 없는 이메일도 비밀번호 비교 시간을 똑같이 쓰게 하는 더미 해시 (응답 시간으로 가입 여부가 드러나지 않게) */
     private final String dummyHash;
 
     public AuthService(UserRepository userRepository, PasswordEncoder passwordEncoder, JwtProvider jwtProvider,
                        AccountTokenService tokenService, RefreshTokenService refreshTokenService,
-                       PasswordService passwordService, AuthMailSender mailSender, Clock clock,
-                       @Value("${app.auth.max-failed-login:10}") int maxFailedLogin,
-                       @Value("${app.web.base-url:http://localhost:5173}") String webBaseUrl) {
+                       PasswordService passwordService, AuthMailSender mailSender, WebLinks webLinks, Clock clock,
+                       @Value("${app.auth.max-failed-login}") int maxFailedLogin) {
         this.userRepository = userRepository;
         this.passwordEncoder = passwordEncoder;
         this.jwtProvider = jwtProvider;
@@ -57,7 +57,7 @@ public class AuthService {
         this.mailSender = mailSender;
         this.clock = clock;
         this.maxFailedLogin = maxFailedLogin;
-        this.webBaseUrl = webBaseUrl.replaceAll("/+$", "");
+        this.webLinks = webLinks;
         this.dummyHash = passwordEncoder.encode("dummy-password-for-timing");
     }
 
@@ -188,7 +188,7 @@ public class AuthService {
                 .filter(u -> u.getStatus() != UserStatus.INACTIVE)
                 .ifPresent(u -> tokenService.issue(u.getId(), TokenPurpose.PASSWORD_RESET, null, clientIp)
                         .ifPresent(issued -> {
-                            String link = webBaseUrl + "/reset-password?token=" + issued.rawToken();
+                            String link = webLinks.resetPassword(issued.rawToken());
                             String to = u.getEmail();
                             String name = u.getName();
                             afterCommit(() -> mailSender.sendPasswordReset(to, name, link, issued.validMinutes()));
@@ -209,6 +209,45 @@ public class AuthService {
         user.verifyEmail(EmailVerifiedVia.LINK, LocalDateTime.now(clock));
     }
 
+    // ------------------------------------------------------------------ 로그인한 사용자의 비밀번호·이메일 변경
+
+    /**
+     * 비밀번호 변경 (내 정보, 임시 비밀번호 강제 변경 공통).
+     * 현재 비밀번호 확인 → 공통 규칙(재사용 금지, 모든 세션 끊기) → 이 기기에는 새 세션을 준다 (다른 기기만 로그아웃되는 효과).
+     * 로그인 유지 여부는 지금 쿠키를 따른다.
+     */
+    @Transactional
+    public LoginResult changeOwnPassword(Long userId, String currentPassword, String newPassword,
+                                         String rawRefreshToken, String userAgent, String clientIp) {
+        if (userId == null) {
+            throw new BusinessException(ErrorCode.UNAUTHORIZED);
+        }
+        User user = userRepository.findById(userId).orElseThrow(() -> new BusinessException(ErrorCode.UNAUTHORIZED));
+        passwordService.checkCurrent(user, currentPassword);
+        boolean remember = refreshTokenService.isRemember(rawRefreshToken);
+        passwordService.change(user, newPassword);
+        RefreshTokenService.Issued refresh = refreshTokenService.issue(user.getId(), remember, userAgent, clientIp);
+        return new LoginResult(accessFor(user), refresh);
+    }
+
+    /** 이메일 변경 확인 (새 주소로 간 메일 링크). 그사이 다른 사람이 그 주소로 가입했으면 EMAIL_DUPLICATED */
+    @Transactional
+    public void confirmEmailChange(String rawToken) {
+        AccountToken token = tokenService.consume(rawToken, TokenPurpose.EMAIL_CHANGE);
+        User user = userRepository.findById(token.getUserId())
+                .orElseThrow(() -> new BusinessException(ErrorCode.TOKEN_INVALID));
+        String newEmail = token.getTargetEmail();
+        if (userRepository.existsByEmail(newEmail)) {
+            throw new BusinessException(ErrorCode.EMAIL_DUPLICATED);
+        }
+        user.changeEmail(newEmail, LocalDateTime.now(clock));
+        try {
+            userRepository.saveAndFlush(user);
+        } catch (DataIntegrityViolationException e) {
+            throw new BusinessException(ErrorCode.EMAIL_DUPLICATED);
+        }
+    }
+
     // ------------------------------------------------------------------ 내부
 
     private TokenResponse accessFor(User user) {
@@ -218,7 +257,7 @@ public class AuthService {
 
     private void sendVerificationMail(User user, String clientIp) {
         tokenService.issue(user.getId(), TokenPurpose.EMAIL_VERIFY, null, clientIp).ifPresent(issued -> {
-            String link = webBaseUrl + "/verify-email?token=" + issued.rawToken();
+            String link = webLinks.verifyEmail(issued.rawToken());
             String to = user.getEmail();
             String name = user.getName();
             // 메일은 DB에 토큰이 확실히 저장된 뒤(커밋 후)에 보낸다

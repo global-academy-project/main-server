@@ -39,9 +39,9 @@ public class AccountTokenService {
     private final int maxPerIpHour;
 
     public AccountTokenService(AccountTokenRepository repository, Clock clock,
-                               @Value("${app.auth.mail-token-minutes:10}") long validMinutes,
-                               @Value("${app.auth.mail-max-per-user-hour:5}") int maxPerUserHour,
-                               @Value("${app.auth.mail-max-per-ip-hour:30}") int maxPerIpHour) {
+                               @Value("${app.auth.mail-token-minutes}") long validMinutes,
+                               @Value("${app.auth.mail-max-per-user-hour}") int maxPerUserHour,
+                               @Value("${app.auth.mail-max-per-ip-hour}") int maxPerIpHour) {
         this.repository = repository;
         this.clock = clock;
         this.validMinutes = validMinutes;

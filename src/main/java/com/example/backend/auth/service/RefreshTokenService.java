@@ -38,8 +38,8 @@ public class RefreshTokenService {
     private final Duration shortFor;
 
     public RefreshTokenService(RefreshTokenRepository repository, Clock clock,
-                               @Value("${app.auth.refresh-remember-days:365}") long rememberDays,
-                               @Value("${app.auth.refresh-short-minutes:30}") long shortMinutes) {
+                               @Value("${app.auth.refresh-remember-days}") long rememberDays,
+                               @Value("${app.auth.refresh-short-minutes}") long shortMinutes) {
         this.repository = repository;
         this.clock = clock;
         this.rememberFor = Duration.ofDays(rememberDays);
@@ -94,6 +94,12 @@ public class RefreshTokenService {
     public void revoke(String rawToken, RevokeReason reason) {
         LocalDateTime now = LocalDateTime.now(clock);
         repository.findByTokenHash(TokenCodec.sha256Hex(rawToken)).ifPresent(t -> t.revoke(reason, now));
+    }
+
+    /** 이 쿠키의 세션이 "로그인 유지"인지 (비밀번호를 바꾼 뒤 이 기기에 새 세션을 줄 때 같은 방식으로 주려고) */
+    public boolean isRemember(String rawToken) {
+        if (rawToken == null || rawToken.isBlank()) return false;
+        return repository.findByTokenHash(TokenCodec.sha256Hex(rawToken)).map(RefreshToken::isRemember).orElse(false);
     }
 
     public void revokeAll(Long userId, RevokeReason reason) {

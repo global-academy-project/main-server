@@ -52,6 +52,10 @@ app:
   web:
     # 메일 링크가 가리킬 웹 주소
     base-url: ${WEB_BASE_URL:http://localhost:5173}
+  admin:
+    # ADMIN이 하나도 없을 때만 기동 시 생성 (must_change_password = TRUE)
+    email: ${ADMIN_EMAIL:}
+    password: ${ADMIN_PASSWORD:}
   mail:
     # log: 메일 대신 서버 로그에 링크 출력 (개발) / smtp: 실제 발송 (spring.mail.* 필요)
     mode: ${MAIL_MODE:log}
@@ -61,11 +65,8 @@ app:
   internal:
     # FastAPI → Spring 내부 API 인증 (/internal/**). 비어 있으면 기동 실패시키도록 구현할 것
     token: ${INTERNAL_API_TOKEN:}
-  admin:
-    # ADMIN이 하나도 없을 때만 기동 시 생성 (must_change_password = TRUE)
-    email: ${ADMIN_EMAIL:}
-    password: ${ADMIN_PASSWORD:}
   ocr:
     client: mock
-    base-url: http://localhost:60100
+    # 로컬 기본값. 통합은 compose 의 APP_OCR_BASE_URL
+    base-url: ${APP_OCR_BASE_URL:http://localhost:60100}
     timeout-seconds: 600

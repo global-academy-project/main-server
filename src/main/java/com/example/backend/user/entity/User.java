@@ -147,6 +147,67 @@ public class User {
         }
     }
 
+    // ------------------------------------------------------------------ 내 정보
+
+    /** 내 정보 수정. 이름은 필수, 나머지는 빈 문자열이면 지운다. */
+    public void updateMyInfo(String name, String phone, String department, String jobTitle) {
+        this.name = name.trim();
+        updateProfile(phone, department, jobTitle);
+    }
+
+    /** 대시보드 드롭다운에서 고른 현장 (권한 확인은 서비스에서) */
+    public void selectSite(Long siteId) {
+        this.lastSiteId = siteId;
+    }
+
+    /** 이메일 변경: 새 주소로 보낸 링크를 눌렀으므로 새 주소의 소유도 확인된 것 */
+    public void changeEmail(String newEmail, LocalDateTime now) {
+        this.email = newEmail;
+        this.emailVerifiedAt = now;
+        this.emailVerifiedVia = EmailVerifiedVia.LINK;
+    }
+
+    // ------------------------------------------------------------------ 관리자 조치
+
+    /** 가입 승인. 이메일 인증이 안 됐으면 DB(ck_users_active_verified)가 거부하므로 먼저 막는다. */
+    public void approve(UserRole role) {
+        if (this.status != UserStatus.PENDING || !isEmailVerified()) {
+            throw new IllegalStateException("승인 대기·이메일 인증 완료 상태에서만 승인할 수 있습니다.");
+        }
+        this.role = role;
+        this.status = UserStatus.ACTIVE;
+    }
+
+    public void changeRole(UserRole role) {
+        this.role = role;
+    }
+
+    /** 사용 중지 (퇴사 등). 로그인·재발급이 막힌다. */
+    public void deactivate() {
+        this.status = UserStatus.INACTIVE;
+    }
+
+    /** 사용 중지 해제 */
+    public void reactivate() {
+        if (this.status != UserStatus.INACTIVE || !isEmailVerified()) {
+            throw new IllegalStateException("사용 중지된 인증 계정만 다시 사용할 수 있습니다.");
+        }
+        this.status = UserStatus.ACTIVE;
+    }
+
+    public void unlock() {
+        if (this.status == UserStatus.LOCKED) {
+            this.status = UserStatus.ACTIVE;
+        }
+        this.failedLoginCount = 0;
+    }
+
+    /** 관리자가 임시 비밀번호를 줌: 다음 로그인 때 바꾸게 하고 잠금도 푼다. */
+    public void assignTemporaryPassword(String hash, LocalDateTime now) {
+        changePassword(hash, now);
+        this.mustChangePassword = true;
+    }
+
     public boolean isEmailVerified() {
         return emailVerifiedAt != null;
     }
