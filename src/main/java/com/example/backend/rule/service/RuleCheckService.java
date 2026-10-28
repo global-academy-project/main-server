@@ -10,6 +10,9 @@ import com.example.backend.rule.repository.RuleRepository;
 import com.example.backend.rule.repository.RuleViolationRepository;
 import com.example.backend.site.entity.Site;
 import com.example.backend.site.repository.SiteRepository;
+import com.example.backend.site.service.SiteAccessService;
+import com.example.backend.user.entity.User;
+import com.example.backend.user.repository.UserRepository;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import tools.jackson.databind.json.JsonMapper;
@@ -21,7 +24,8 @@ import java.util.Map;
 
 /**
  * check_rules: 규칙 판정 + (대상 문서가 있으면) 판정 기록 저장.
- * 웹(/api/v1/rules/check)과 에이전트 내부 API 가 모두 여기를 부른다. 현장 권한 확인은 부르는 쪽(컨트롤러) 몫.
+ * 웹(/api/v1/rules/check → checkForUser)과 에이전트 내부 API(→ check)가 모두 여기를 부른다.
+ * 웹은 그 현장 권한을 확인하고, 내부 API 는 토큰 필터로 이미 인증된 상태다.
  *
  * 규칙 위반은 오류가 아니다 → 정상 응답에 result = BLOCK 으로 담는다.
  * 승인 요청을 막을 때는 저장된 최신 판정을 본다 (미리 확인 결과로 승인을 열지 않는다).
@@ -40,11 +44,13 @@ public class RuleCheckService {
     private final RuleEvaluator evaluator;
     private final JsonMapper jsonMapper;
     private final Clock clock;
+    private final UserRepository userRepository;
+    private final SiteAccessService siteAccessService;
 
     public RuleCheckService(RuleRepository ruleRepository, RuleEvaluationRepository evaluationRepository,
                             RuleViolationRepository violationRepository, SiteRepository siteRepository,
                             RuleTargetLookup targetLookup, RuleEvaluator evaluator, JsonMapper jsonMapper,
-                            Clock clock) {
+                            Clock clock, UserRepository userRepository, SiteAccessService siteAccessService) {
         this.ruleRepository = ruleRepository;
         this.evaluationRepository = evaluationRepository;
         this.violationRepository = violationRepository;
@@ -53,6 +59,21 @@ public class RuleCheckService {
         this.evaluator = evaluator;
         this.jsonMapper = jsonMapper;
         this.clock = clock;
+        this.userRepository = userRepository;
+        this.siteAccessService = siteAccessService;
+    }
+
+    /** 웹: 로그인한 사용자가 그 현장 권한이 있을 때만 (관리자는 모든 현장). 없으면 SITE_NOT_ALLOWED */
+    @Transactional
+    public RuleCheckResult checkForUser(Long userId, RuleCheckCommand command) {
+        User user = userId == null ? null : userRepository.findById(userId).orElse(null);
+        if (user == null) {
+            throw new BusinessException(ErrorCode.UNAUTHORIZED);
+        }
+        if (command.siteId() == null || !siteAccessService.canAccess(user, command.siteId())) {
+            throw new BusinessException(ErrorCode.SITE_NOT_ALLOWED);
+        }
+        return check(command);
     }
 
     @Transactional
