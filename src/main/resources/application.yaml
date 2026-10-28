@@ -51,7 +51,7 @@ app:
     cookie-secure: ${COOKIE_SECURE:false}   # https 운영에서 true
   web:
     # 메일 링크가 가리킬 웹 주소
-    base-url: ${WEB_BASE_URL:http://localhost:5173}
+    base-url: ${WEB_BASE_URL:http://localhost:50001}
   admin:
     # ADMIN이 하나도 없을 때만 기동 시 생성 (must_change_password = TRUE)
     email: ${ADMIN_EMAIL:}
