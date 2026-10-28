@@ -7,6 +7,7 @@ public enum ErrorCode {
     UNSUPPORTED_FILE_TYPE(HttpStatus.BAD_REQUEST, "PDF 파일만 업로드할 수 있습니다."),
     ENGINE_NOT_ALLOWED(HttpStatus.BAD_REQUEST, "현재 사용할 수 없는 엔진입니다."),
     UNAUTHORIZED(HttpStatus.UNAUTHORIZED, "인증이 필요합니다."),
+    FORBIDDEN(HttpStatus.FORBIDDEN, "권한이 없습니다."),
     TOKEN_EXPIRED(HttpStatus.UNAUTHORIZED, "토큰이 만료되었습니다."),
     LOGIN_FAILED(HttpStatus.UNAUTHORIZED, "이메일 또는 비밀번호가 올바르지 않습니다."),
 
@@ -25,6 +26,11 @@ public enum ErrorCode {
 
     PASSWORD_REUSED(HttpStatus.BAD_REQUEST, "최근에 사용한 비밀번호는 다시 쓸 수 없습니다."),
     CONFLICT_MODIFIED(HttpStatus.CONFLICT, "다른 곳에서 먼저 수정했습니다. 새로고침 후 다시 시도해 주세요."),
+    PASSWORD_MISMATCH(HttpStatus.BAD_REQUEST, "현재 비밀번호가 올바르지 않습니다."),
+    INVALID_STATE(HttpStatus.CONFLICT, "현재 상태에서는 할 수 없는 작업입니다."),
+    USER_NOT_FOUND(HttpStatus.NOT_FOUND, "사용자를 찾을 수 없습니다."),
+    SITE_NOT_FOUND(HttpStatus.NOT_FOUND, "현장을 찾을 수 없습니다."),
+    SITE_NOT_ALLOWED(HttpStatus.FORBIDDEN, "권한이 없는 현장입니다."),
 
     DOCUMENT_NOT_FOUND(HttpStatus.NOT_FOUND, "문서를 찾을 수 없습니다."),
     RUN_NOT_FOUND(HttpStatus.NOT_FOUND, "처리 이력을 찾을 수 없습니다."),
@@ -32,7 +38,7 @@ public enum ErrorCode {
     FILE_NOT_FOUND(HttpStatus.NOT_FOUND, "저장된 파일을 찾을 수 없습니다."),
     EMAIL_DUPLICATED(HttpStatus.CONFLICT, "이미 가입된 이메일입니다."),
     ALREADY_PROCESSING(HttpStatus.CONFLICT, "처리 중인 문서입니다."),
-    FILE_TOO_LARGE(HttpStatus.PAYLOAD_TOO_LARGE, "파일 크기는 20MB 이하여야 합니다."),
+    FILE_TOO_LARGE(HttpStatus.CONTENT_TOO_LARGE, "파일 크기는 20MB 이하여야 합니다."),
     INTERNAL_ERROR(HttpStatus.INTERNAL_SERVER_ERROR, "서버 오류가 발생했습니다."),
     OCR_SERVER_ERROR(HttpStatus.BAD_GATEWAY, "OCR 서버 호출에 실패했습니다.");
 

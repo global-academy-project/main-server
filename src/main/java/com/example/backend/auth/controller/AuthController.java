@@ -1,5 +1,6 @@
 package com.example.backend.auth.controller;
 
+import com.example.backend.auth.dto.ChangePasswordRequest;
 import com.example.backend.auth.dto.EmailRequest;
 import com.example.backend.auth.dto.LoginRequest;
 import com.example.backend.auth.dto.PasswordResetRequest;
@@ -15,6 +16,7 @@ import jakarta.servlet.http.HttpServletResponse;
 import jakarta.validation.Valid;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
+import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.*;
 
 /**
@@ -84,6 +86,29 @@ public class AuthController {
     @PostMapping("/password/forgot")
     public ApiResponse<Object> forgotPassword(@Valid @RequestBody EmailRequest request, HttpServletRequest http) {
         authService.forgotPassword(request.email(), http.getRemoteAddr());
+        return ApiResponse.okEmpty();
+    }
+
+    /**
+     * 로그인한 사용자의 비밀번호 변경 (내 정보, 임시 비밀번호 강제 변경). access token 필요.
+     * 다른 기기는 모두 로그아웃되고, 이 기기는 새 access token + 새 쿠키를 받는다.
+     * 실패: PASSWORD_MISMATCH(400) / PASSWORD_REUSED(400) / UNAUTHORIZED(401)
+     */
+    @PostMapping("/password/change")
+    public ApiResponse<TokenResponse> changePassword(@AuthenticationPrincipal Long userId,
+                                                     @Valid @RequestBody ChangePasswordRequest request,
+                                                     @CookieValue(name = RefreshCookie.NAME, required = false) String token,
+                                                     HttpServletRequest http, HttpServletResponse response) {
+        LoginResult result = authService.changeOwnPassword(userId, request.currentPassword(), request.newPassword(),
+                token, http.getHeader(HttpHeaders.USER_AGENT), http.getRemoteAddr());
+        refreshCookie.write(response, result.refresh());
+        return ApiResponse.ok(result.body());
+    }
+
+    /** 이메일 변경 확인 (새 주소로 간 메일 링크). 로그인 없이 호출 */
+    @PostMapping("/email/change/confirm")
+    public ApiResponse<Object> confirmEmailChange(@Valid @RequestBody TokenRequest request) {
+        authService.confirmEmailChange(request.token());
         return ApiResponse.okEmpty();
     }
 

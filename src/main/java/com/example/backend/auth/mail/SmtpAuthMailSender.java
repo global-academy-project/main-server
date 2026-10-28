@@ -42,6 +42,15 @@ public class SmtpAuthMailSender implements AuthMailSender {
                         + "요청한 적이 없다면 이 메일은 무시하세요. 비밀번호는 바뀌지 않습니다.");
     }
 
+    @Override
+    public void sendEmailChange(String to, String name, String link, long validMinutes) {
+        send(to, "[산업현장 안전관리 AI] 이메일 변경 확인",
+                name + "님, 로그인 이메일을 이 주소로 바꾸려면 아래 링크를 눌러 주세요.\n\n"
+                        + link + "\n\n"
+                        + "링크는 " + validMinutes + "분 동안 한 번만 쓸 수 있습니다.\n"
+                        + "요청한 적이 없다면 이 메일은 무시하세요. 이메일은 바뀌지 않습니다.");
+    }
+
     private void send(String to, String subject, String text) {
         SimpleMailMessage msg = new SimpleMailMessage();
         msg.setFrom(from);

@@ -1,0 +1,90 @@
+### 인증·내 정보·관리자 확인용 (IntelliJ HTTP Client). 쿠키(refresh_token)는 자동으로 저장·전송된다.
+### 위에서부터 순서대로 실행. {{...}} 값은 앞 요청 응답에서 자동으로 채운다.
+@host = http://localhost:8080
+
+### 1. 관리자 로그인 (첫 관리자: ADMIN_EMAIL / ADMIN_PASSWORD)
+POST {{host}}/api/v1/auth/login
+Content-Type: application/json
+
+{"email": "admin@test.com", "password": "Admin1234!", "rememberMe": true}
+
+> {% client.global.set("adminToken", response.body.data.accessToken); %}
+
+### 2. (첫 관리자는 mustChangePassword=true) 비밀번호 변경. 이후 1번의 비밀번호를 새것으로
+POST {{host}}/api/v1/auth/password/change
+Authorization: Bearer {{adminToken}}
+Content-Type: application/json
+
+{"currentPassword": "Admin1234!", "newPassword": "Admin5678!"}
+
+> {% client.global.set("adminToken", response.body.data.accessToken); %}
+
+### 3. 승인 대기 목록
+GET {{host}}/api/v1/admin/users?status=PENDING
+Authorization: Bearer {{adminToken}}
+
+### 4. 승인 (userId 와 siteId 를 바꿔서)
+POST {{host}}/api/v1/admin/users/3/approve
+Authorization: Bearer {{adminToken}}
+Content-Type: application/json
+
+{"role": "MEMBER", "sites": [{"siteId": 1, "role": "WRITER"}, {"siteId": 2, "role": "APPROVER"}]}
+
+### 5. 회원 로그인
+POST {{host}}/api/v1/auth/login
+Content-Type: application/json
+
+{"email": "test@test.com", "password": "tMWeE6@Pt$Cp", "rememberMe": false}
+
+> {% client.global.set("userToken", response.body.data.accessToken); %}
+
+### 6. 내 정보 (sites = 드롭다운, currentSiteId = 기본 현장, lockVersion = 수정할 때 돌려보냄)
+GET {{host}}/api/v1/users/me
+Authorization: Bearer {{userToken}}
+
+> {% client.global.set("lockVersion", response.body.data.lockVersion); %}
+
+### 7. 내 정보 수정
+PATCH {{host}}/api/v1/users/me
+Authorization: Bearer {{userToken}}
+Content-Type: application/json
+
+{"name": "테스트", "phone": "01012345678", "department": "안전보건팀", "jobTitle": "대리", "lockVersion": {{lockVersion}}}
+
+### 8. 같은 lockVersion 으로 한 번 더 → 409 CONFLICT_MODIFIED
+PATCH {{host}}/api/v1/users/me
+Authorization: Bearer {{userToken}}
+Content-Type: application/json
+
+{"name": "테스트2", "lockVersion": {{lockVersion}}}
+
+### 9. 현장 선택 (권한 없는 현장이면 403 SITE_NOT_ALLOWED)
+PUT {{host}}/api/v1/users/me/last-site
+Authorization: Bearer {{userToken}}
+Content-Type: application/json
+
+{"siteId": 2}
+
+### 10. 일반 회원이 관리자 API → 403 FORBIDDEN
+GET {{host}}/api/v1/admin/users
+Authorization: Bearer {{userToken}}
+
+### 11. 임시 비밀번호 발급 (응답에 한 번만 보임)
+POST {{host}}/api/v1/admin/users/3/temporary-password
+Authorization: Bearer {{adminToken}}
+
+### 12. 임시 비밀번호로 받은 access token 으로 다른 API → 403 PASSWORD_CHANGE_REQUIRED
+###     (5번을 임시 비밀번호로 다시 로그인한 뒤 실행)
+PUT {{host}}/api/v1/users/me/last-site
+Authorization: Bearer {{userToken}}
+Content-Type: application/json
+
+{"siteId": 1}
+
+### 13. 사용 중지 → 그 회원의 access token 이 바로 거부됨 (6번 다시 실행하면 403 ACCOUNT_INACTIVE)
+POST {{host}}/api/v1/admin/users/3/deactivate
+Authorization: Bearer {{adminToken}}
+
+### 14. 다시 사용
+POST {{host}}/api/v1/admin/users/3/reactivate
+Authorization: Bearer {{adminToken}}

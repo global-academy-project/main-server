@@ -33,8 +33,8 @@ public class AdminBootstrap implements ApplicationRunner {
     private final String password;
 
     public AdminBootstrap(UserRepository userRepository, PasswordEncoder passwordEncoder, Clock clock,
-                          @Value("${app.admin.email:}") String email,
-                          @Value("${app.admin.password:}") String password) {
+                          @Value("${app.admin.email}") String email,
+                          @Value("${app.admin.password}") String password) {
         this.userRepository = userRepository;
         this.passwordEncoder = passwordEncoder;
         this.clock = clock;

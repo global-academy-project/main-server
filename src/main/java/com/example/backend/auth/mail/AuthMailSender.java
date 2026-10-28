@@ -12,4 +12,7 @@ public interface AuthMailSender {
 
     /** 비밀번호 재설정 링크 (웹 /reset-password?token=) */
     void sendPasswordReset(String to, String name, String link, long validMinutes);
+
+    /** 이메일 변경 확인 링크. 새 주소로 보낸다 (웹 /verify-email-change?token=) */
+    void sendEmailChange(String to, String name, String link, long validMinutes);
 }

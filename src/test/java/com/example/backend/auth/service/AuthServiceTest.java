@@ -8,6 +8,7 @@ import com.example.backend.auth.entity.RevokeReason;
 import com.example.backend.auth.entity.TokenPurpose;
 import com.example.backend.auth.jwt.JwtProvider;
 import com.example.backend.auth.mail.AuthMailSender;
+import com.example.backend.auth.mail.WebLinks;
 import com.example.backend.common.exception.BusinessException;
 import com.example.backend.common.exception.ErrorCode;
 import com.example.backend.user.dto.UserResponse;
@@ -72,7 +73,7 @@ class AuthServiceTest {
         when(refreshTokenService.issue(anyLong(), anyBoolean(), any(), any()))
                 .thenAnswer(inv -> new RefreshTokenService.Issued(inv.getArgument(0), "RT", inv.getArgument(1), Duration.ofMinutes(30)));
         service = new AuthService(userRepository, passwordEncoder, jwtProvider, tokenService, refreshTokenService,
-                passwordService, mailSender, clock, 10, "http://web.test/");
+                passwordService, mailSender, new WebLinks("http://web.test/"), clock, 10);
     }
 
     private User storedUser(UserStatus status, boolean verified) {
@@ -383,5 +384,54 @@ class AuthServiceTest {
 
         verify(passwordService).change(user, "NewPassw0rd!");
         assertThat(user.isEmailVerified()).isTrue();
+    }
+
+    // ---------- 로그인한 사용자의 비밀번호·이메일 변경 (3단계) ----------
+
+    @Test
+    @DisplayName("비밀번호 변경: 현재 비밀번호 확인 → 공통 규칙 → 이 기기엔 같은 유지 방식으로 새 세션")
+    void changeOwnPassword() {
+        User user = storedUser(UserStatus.ACTIVE, true);
+        when(userRepository.findById(7L)).thenReturn(Optional.of(user));
+        when(refreshTokenService.isRemember("RT")).thenReturn(true);
+        when(jwtProvider.createToken(7L)).thenReturn("JWT");
+
+        LoginResult r = service.changeOwnPassword(7L, "Old0000!", "NewPassw0rd!", "RT", "UA", "ip");
+
+        org.mockito.InOrder order = org.mockito.Mockito.inOrder(passwordService, refreshTokenService);
+        order.verify(passwordService).checkCurrent(user, "Old0000!");
+        order.verify(passwordService).change(user, "NewPassw0rd!");
+        order.verify(refreshTokenService).issue(7L, true, "UA", "ip");
+        assertThat(r.body().accessToken()).isEqualTo("JWT");
+    }
+
+    @Test
+    @DisplayName("비밀번호 변경: 로그인 안 함 → UNAUTHORIZED, 현재 비밀번호 틀림 → PASSWORD_MISMATCH (바꾸지 않음)")
+    void changeOwnPassword_rejects() {
+        expectCode(() -> service.changeOwnPassword(null, "a", "b", null, "UA", "ip"), ErrorCode.UNAUTHORIZED);
+
+        User user = storedUser(UserStatus.ACTIVE, true);
+        when(userRepository.findById(7L)).thenReturn(Optional.of(user));
+        org.mockito.Mockito.doThrow(new BusinessException(ErrorCode.PASSWORD_MISMATCH))
+                .when(passwordService).checkCurrent(user, "wrong");
+
+        expectCode(() -> service.changeOwnPassword(7L, "wrong", "NewPassw0rd!", null, "UA", "ip"), ErrorCode.PASSWORD_MISMATCH);
+        verify(passwordService, never()).change(any(), any());
+    }
+
+    @Test
+    @DisplayName("이메일 변경 확인: 토큰의 새 주소로 바꾸고 인증 시각 갱신, 그사이 다른 사람이 쓰면 EMAIL_DUPLICATED")
+    void confirmEmailChange() {
+        User user = storedUser(UserStatus.ACTIVE, true);
+        when(userRepository.findById(7L)).thenReturn(Optional.of(user));
+        AccountToken token = new AccountToken(7L, TokenPurpose.EMAIL_CHANGE, "h".repeat(64), "new@example.com", null, now, now.plusMinutes(10));
+        when(tokenService.consume("CHG", TokenPurpose.EMAIL_CHANGE)).thenReturn(token);
+
+        service.confirmEmailChange("CHG");
+        assertThat(user.getEmail()).isEqualTo("new@example.com");
+        assertThat(user.getEmailVerifiedAt()).isEqualTo(now);
+
+        when(userRepository.existsByEmail("new@example.com")).thenReturn(true);
+        expectCode(() -> service.confirmEmailChange("CHG"), ErrorCode.EMAIL_DUPLICATED);
     }
 }

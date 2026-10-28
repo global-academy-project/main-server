@@ -35,7 +35,7 @@ public class PasswordService {
 
     public PasswordService(PasswordHistoryRepository historyRepository, RefreshTokenService refreshTokenService,
                            PasswordEncoder passwordEncoder, Clock clock,
-                           @Value("${app.auth.password-history-count:3}") int historyCount) {
+                           @Value("${app.auth.password-history-count}") int historyCount) {
         this.historyRepository = historyRepository;
         this.refreshTokenService = refreshTokenService;
         this.passwordEncoder = passwordEncoder;
@@ -51,6 +51,23 @@ public class PasswordService {
         historyRepository.save(new PasswordHistory(user.getId(), user.getPasswordHash(), now));
         user.changePassword(passwordEncoder.encode(newRawPassword), now);
         refreshTokenService.revokeAll(user.getId(), RevokeReason.PASSWORD_CHANGED);
+    }
+
+    /**
+     * 관리자가 임시 비밀번호 발급. 재사용 검사는 하지 않는다 (임시값이라). 다음 로그인 때 변경을 강제하고 세션을 모두 끊는다.
+     */
+    public void assignTemporary(User user, String temporaryRawPassword) {
+        LocalDateTime now = LocalDateTime.now(clock);
+        historyRepository.save(new PasswordHistory(user.getId(), user.getPasswordHash(), now));
+        user.assignTemporaryPassword(passwordEncoder.encode(temporaryRawPassword), now);
+        refreshTokenService.revokeAll(user.getId(), RevokeReason.ADMIN);
+    }
+
+    /** 현재 비밀번호 확인 (내 정보에서 비밀번호·이메일을 바꿀 때) */
+    public void checkCurrent(User user, String currentRawPassword) {
+        if (currentRawPassword == null || !passwordEncoder.matches(currentRawPassword, user.getPasswordHash())) {
+            throw new BusinessException(ErrorCode.PASSWORD_MISMATCH);
+        }
     }
 
     private boolean isReused(User user, String newRawPassword) {
