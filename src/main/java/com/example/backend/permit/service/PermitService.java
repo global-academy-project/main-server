@@ -48,7 +48,7 @@ import java.util.stream.Collectors;
  * 작업허가 (화기·밀폐·고소 공통).
  * 흐름: 작성(DRAFT) → 측정값 입력 → 판정(check) → BLOCK 이면 BLOCKED, 아니면 DRAFT → 승인 요청(submit, PENDING)
  *  - 내용이나 측정값이 바뀌면 최근 판정이 무효가 되어 다시 판정해야 승인 요청할 수 있다
- *  - 승인 요청은 "최근 판정이 있고 BLOCK 이 아님"일 때만 (에이전트를 거치지 않는 요청도 여기서 막는다)
+ *  - 승인 요청은 "최근 판정이 있고 BLOCK 이 아니며 적용 규칙이 1개 이상"일 때만 (에이전트를 거치지 않는 요청도 여기서 막는다)
  *  - 승인 요청 뒤에는 내용·측정값을 바꿀 수 없다 (V9 트리거도 막음)
  * 승인(approvals) 기록과 결재 흐름은 승인 기능에서 붙인다.
  */
@@ -159,7 +159,8 @@ public class PermitService {
                 permit.getPermitType().toWorkType(), EvaluationTarget.PERMIT, permit.getId(), null, ruleInput(permit)));
         permit.applyEvaluation(result.evaluationId(), result.result() == EvaluationResult.BLOCK);
         permitRepository.saveAndFlush(permit);
-        return new PermitCheckResponse(permit.getId(), permit.getStatus(), canSubmit(permit, result.result()), result);
+        return new PermitCheckResponse(permit.getId(), permit.getStatus(),
+                canSubmit(permit, result.result(), result.rulesApplied()), result);
     }
 
     /** 승인 요청. 최근 판정이 없거나(내용이 바뀜) BLOCK 이면 INVALID_STATE */
@@ -179,6 +180,9 @@ public class PermitService {
                 .orElseThrow(() -> new BusinessException(ErrorCode.INVALID_STATE, "규칙 판정을 먼저 해야 합니다."));
         if (evaluation.getResult() == EvaluationResult.BLOCK) {
             throw new BusinessException(ErrorCode.INVALID_STATE, "규칙 판정이 BLOCK 이라 승인 요청할 수 없습니다.");
+        }
+        if (evaluation.getRulesApplied() == 0) {
+            throw new BusinessException(ErrorCode.INVALID_STATE, "이 허가 종류는 아직 판정 규칙이 없어 승인 요청할 수 없습니다.");
         }
         permit.submit();
         permitRepository.saveAndFlush(permit);
@@ -216,9 +220,10 @@ public class PermitService {
         return permit;
     }
 
-    private static boolean canSubmit(Permit permit, EvaluationResult result) {
+    /** 승인 요청 가능: 작성 중 + 최근 판정 있음 + BLOCK 아님 + 적용 규칙 1개 이상 (규칙이 없는 허가는 판정 불가) */
+    private static boolean canSubmit(Permit permit, EvaluationResult result, int rulesApplied) {
         return permit.getStatus() == PermitStatus.DRAFT && permit.getLastEvaluationId() != null
-                && result != EvaluationResult.BLOCK;
+                && result != EvaluationResult.BLOCK && rulesApplied > 0;
     }
 
     private PermitResponse toResponse(Permit p) {
@@ -227,17 +232,19 @@ public class PermitService {
                 .map(PermitResponse.Measurement::from).toList();
         PermitResponse.Evaluation evaluation = null;
         EvaluationResult result = null;
+        int rulesApplied = 0;
         if (p.getLastEvaluationId() != null) {
             RuleEvaluation e = evaluationRepository.findById(p.getLastEvaluationId()).orElse(null);
             if (e != null) {
                 result = e.getResult();
+                rulesApplied = e.getRulesApplied();
                 evaluation = new PermitResponse.Evaluation(e.getId(), e.getResult(), e.getEvaluatedAt(), violations(e.getId()));
             }
         }
         return new PermitResponse(p.getId(), p.getSiteId(), p.getWorkId(), p.getPermitType(), p.getRevision(),
                 p.getPermitNo(), p.getValidFrom(), p.getValidTo(), p.getStatus(), p.getWatcherName(),
                 p.getSupervisorName(), fromJson(p.getFormData()), measurements, evaluation,
-                evaluation != null && canSubmit(p, result), p.getLockVersion());
+                evaluation != null && canSubmit(p, result, rulesApplied), p.getLockVersion());
     }
 
     private List<PermitResponse.Violation> violations(Long evaluationId) {
