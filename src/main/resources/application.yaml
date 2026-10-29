@@ -70,3 +70,10 @@ app:
     # 로컬 기본값. 통합은 compose 의 APP_OCR_BASE_URL
     base-url: ${APP_OCR_BASE_URL:http://localhost:60100}
     timeout-seconds: 600
+  agent:
+    # 에이전트 AI 서버: mock(가짜 응답) | fastapi(실제 main-ai-model)
+    client: ${APP_AGENT_CLIENT:mock}
+    base-url: ${APP_AGENT_BASE_URL:http://localhost:60100}
+    connect-timeout-seconds: 2
+    read-timeout-seconds: 120
+    network-mode: ${NETWORK_ENV:OPEN}
