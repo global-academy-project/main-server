@@ -13,7 +13,7 @@ import java.util.Map;
  *   evidence.sufficiency    → SUFFICIENCY
  *   evidence.search         → 저장 안 함 (실제 검색은 TOOL 단계로 남음)
  *   judgment / verification → JUDGE / VERIFY
- *   OK / ERROR              → DONE / FAILED
+ *   OK / ERROR              → DONE / FAILED (그 밖의 값은 끝났다고 볼 수 없으므로 FAILED)
  * 모르는 이름은 저장하지 않는다 (null). 응답 전체는 output_json 에 남는다.
  */
 final class AgentStepMapping {
@@ -38,7 +38,8 @@ final class AgentStepMapping {
         return null;
     }
 
+    /** OK 만 DONE. ERROR·빈 값·모르는 값은 FAILED (모르는 상태를 성공으로 기록하지 않는다) */
     static AgentStepStatus statusOf(String status) {
-        return "ERROR".equals(status) ? AgentStepStatus.FAILED : AgentStepStatus.DONE;
+        return "OK".equals(status) ? AgentStepStatus.DONE : AgentStepStatus.FAILED;
     }
 }

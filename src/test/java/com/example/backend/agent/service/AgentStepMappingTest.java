@@ -30,9 +30,12 @@ class AgentStepMappingTest {
     }
 
     @Test
-    @DisplayName("OK → DONE, ERROR → FAILED")
+    @DisplayName("OK 만 DONE. ERROR·빈 값·모르는 값은 FAILED (성공으로 기록하지 않음)")
     void status() {
         assertThat(AgentStepMapping.statusOf("OK")).isEqualTo(AgentStepStatus.DONE);
         assertThat(AgentStepMapping.statusOf("ERROR")).isEqualTo(AgentStepStatus.FAILED);
+        assertThat(AgentStepMapping.statusOf(null)).isEqualTo(AgentStepStatus.FAILED);
+        assertThat(AgentStepMapping.statusOf("RUNNING")).isEqualTo(AgentStepStatus.FAILED);
+        assertThat(AgentStepMapping.statusOf("ok")).isEqualTo(AgentStepStatus.FAILED);
     }
 }
