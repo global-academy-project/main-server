@@ -1,0 +1,6 @@
+package com.example.backend.history.entity;
+
+/** 이력 대상 기록 종류. V6 record_history.target_type CHECK 와 같은 값. */
+public enum HistoryTarget {
+    WORK, RISK, PERMIT, INSPECTION, TBM, NEAR_MISS, DAILY_LOG, APPROVAL, USER, SITE, ZONE, EQUIPMENT, RULE, SITE_MEMBER, WORKER, QUALIFICATION, CORRECTIVE_ACTION, WARNING, FORM_TEMPLATE, DOCUMENT, PERMIT_EVENT, APPROVAL_POLICY, TEAM, CHEMICAL
+}

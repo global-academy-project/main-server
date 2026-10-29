@@ -1,0 +1,6 @@
+package com.example.backend.history.entity;
+
+/** 이력 행위. V6 record_history.action CHECK 와 같은 값. */
+public enum HistoryAction {
+    CREATE, UPDATE, SUBMIT, APPROVE, REJECT, BLOCK, UNBLOCK, AI_DRAFT, CLOSE, CANCEL, ROLE_CHANGE, STATUS_CHANGE, GRANT, REVOKE, ACKNOWLEDGE, VERIFY, SIGN, EXPORT, PASSWORD_RESET, PASSWORD_CHANGE, UNLOCK, EMAIL_VERIFY, EMAIL_CHANGE
+}
