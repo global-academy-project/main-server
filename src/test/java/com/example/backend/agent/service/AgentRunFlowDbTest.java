@@ -7,11 +7,17 @@ import com.example.backend.agent.dto.StartWorkRegisterRequest;
 import com.example.backend.agent.entity.*;
 import com.example.backend.agent.repository.AgentRunRepository;
 import com.example.backend.common.exception.ErrorCode;
+import com.example.backend.permit.dto.CreatePermitRequest;
+import com.example.backend.permit.entity.PermitType;
+import com.example.backend.permit.service.PermitService;
+import com.example.backend.rule.entity.WorkType;
 import com.example.backend.site.entity.Site;
 import com.example.backend.site.entity.SiteMode;
 import com.example.backend.site.repository.SiteRepository;
 import com.example.backend.user.entity.User;
 import com.example.backend.user.repository.UserRepository;
+import com.example.backend.work.dto.CreateWorkRequest;
+import com.example.backend.work.service.WorkService;
 import jakarta.persistence.EntityManager;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -21,6 +27,7 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.transaction.annotation.Transactional;
 import tools.jackson.databind.json.JsonMapper;
 
+import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.UUID;
@@ -49,7 +56,7 @@ class AgentRunFlowDbTest {
                         "input": {"text": "용접"}, "output": {"workTypes": ["HOT"]}, "elapsedMs": 3}]}
             """;
 
-    /** 완료. evidence.search 는 저장하지 않고, KB 근거는 출처 종류가 없어 저장하지 않는다 */
+    /** 완료. evidence.search 는 저장하지 않는다. 근거는 규칙·MSDS·올바른 KB 만 저장 (출처 종류 없음·허용 안 된 컬렉션·없는 규칙은 건너뜀) */
     private static final String DONE = """
             {"runStatus": "DONE",
              "slots": {"utterances": ["오늘 용접 작업 있어", "R-201 하부"], "askedKeys": []},
@@ -59,18 +66,26 @@ class AgentRunFlowDbTest {
                {"kind": "RULE", "refId": "HOT_LEL_MAX", "source": "화기작업 가연성 가스 기준", "snippet": "10 %LEL 미만"},
                {"kind": "MSDS", "refId": "108-88-3", "source": "톨루엔 MSDS", "snippet": "인화성 액체 구분 2"},
                {"kind": "KB", "refId": "6f1e2d3c-4b5a-5c6d-8e7f-0a1b2c3d4e5f", "source": "KOSHA GUIDE", "snippet": "…"},
-               {"kind": "RULE", "refId": "NO_SUCH_RULE", "source": "없는 규칙", "snippet": "…"}],
+               {"kind": "RULE", "refId": "NO_SUCH_RULE", "source": "없는 규칙", "snippet": "…"},
+               {"kind": "KB", "refId": "6f1e2d3c-4b5a-5c6d-8e7f-0a1b2c3d4e5f", "source": "KOSHA GUIDE H-80-2021",
+                "snippet": "가연성 가스 10 %LEL 미만", "sourceType": "KOSHA_GUIDE", "kbCollection": "kb_guides"},
+               {"kind": "KB", "refId": "6f1e2d3c-4b5a-5c6d-8e7f-0a1b2c3d4e5f", "source": "잘못된 컬렉션",
+                "snippet": "…", "sourceType": "KOSHA_GUIDE", "kbCollection": "kb_other"}],
              "verification": [],
              "steps": [
                {"seq": 1, "kind": "TOOL", "name": "classify_work", "toolName": "classify_work", "status": "OK", "input": {}, "output": {}, "elapsedMs": 2},
                {"seq": 2, "kind": "PHASE", "name": "evidence.plan", "toolName": null, "status": "OK", "input": {}, "output": {}, "elapsedMs": 5},
                {"seq": 3, "kind": "PHASE", "name": "evidence.search", "toolName": null, "status": "OK", "input": {}, "output": {}, "elapsedMs": 9},
                {"seq": 4, "kind": "TOOL", "name": "check_rules", "toolName": "check_rules", "status": "ERROR", "input": {}, "output": {"code": "TOOL_INPUT_INVALID"}, "elapsedMs": 4, "errorCode": "TOOL_INPUT_INVALID"},
-               {"seq": 5, "kind": "PHASE", "name": "judgment", "toolName": null, "status": "OK", "input": {}, "output": {}, "elapsedMs": 7}]}
+               {"seq": 5, "kind": "PHASE", "name": "judgment", "toolName": null, "status": "OK", "input": {}, "output": {}, "elapsedMs": 7},
+               {"seq": 6, "kind": "PHASE", "name": "verification", "toolName": null, "status": "SKIPPED", "input": {}, "output": {}, "elapsedMs": 1}]}
             """;
 
     @Autowired AgentRunService service;
     @Autowired AgentResultWriter writer;
+    @Autowired AgentRunSweeper sweeper;
+    @Autowired WorkService workService;
+    @Autowired PermitService permitService;
     @Autowired AgentRunRepository runRepository;
     @Autowired UserRepository userRepository;
     @Autowired SiteRepository siteRepository;
@@ -135,10 +150,11 @@ class AgentRunFlowDbTest {
                         tuple(2, AgentStepType.PLAN, AgentStepStatus.DONE),
                         tuple(3, AgentStepType.TOOL_CALL, AgentStepStatus.FAILED),
                         tuple(4, AgentStepType.JUDGE, AgentStepStatus.DONE),
-                        tuple(5, AgentStepType.OUTPUT, AgentStepStatus.DONE));
-        // 근거: 규칙(있는 코드)·MSDS 만 저장. KB(출처 종류 없음)·없는 규칙은 건너뜀
+                        tuple(5, AgentStepType.VERIFY, AgentStepStatus.FAILED),   // 모르는 상태는 성공으로 기록하지 않음
+                        tuple(6, AgentStepType.OUTPUT, AgentStepStatus.DONE));
+        // 근거: 규칙(있는 코드)·MSDS·올바른 KB 만 저장. 출처 종류 없는 KB·없는 규칙·허용 안 된 컬렉션은 건너뜀 (실행은 성공)
         assertThat(d2.citations()).extracting(AgentRunDetail.Citation::sourceType)
-                .containsExactly(EvidenceSourceType.RULE, EvidenceSourceType.MSDS);
+                .containsExactly(EvidenceSourceType.RULE, EvidenceSourceType.MSDS, EvidenceSourceType.KOSHA_GUIDE);
         // 응답 전체(drafts·approvalGate)는 result 에 그대로
         assertThat(jsonMapper.writeValueAsString(d2.result())).contains("drafts", "가연성 가스 측정값이 없습니다.");
 
@@ -195,5 +211,69 @@ class AgentRunFlowDbTest {
         expectCode(() -> service.getMessages(other, run.conversationId()), ErrorCode.NOT_FOUND);
         expectCode(() -> service.startWorkRegister(other,
                 new StartWorkRegisterRequest(siteId, run.conversationId(), null, "남의 대화")), ErrorCode.NOT_FOUND);
+    }
+
+    @Test
+    @DisplayName("다른 현장의 허가서나 승인 요청된 허가서는 permitId 로 넣을 수 없다")
+    void permitMustBelongToSite() {
+        LocalDateTime from = LocalDateTime.of(2026, 10, 29, 13, 0);
+        Long otherSiteId = siteRepository.save(new Site("테스트현장2-" + UUID.randomUUID().toString().substring(0, 8),
+                SiteMode.VERIFY)).getId();
+        Long otherWork = workService.create(userId, new CreateWorkRequest(otherSiteId, LocalDate.of(2026, 10, 29),
+                "다른 현장 용접", null, WorkType.HOT, from, from.plusHours(2), 2)).workId();
+        Long otherPermit = permitService.create(userId, new CreatePermitRequest(otherWork, PermitType.HOT, from,
+                from.plusHours(2), "김감시", null, null)).permitId();
+        Long myWork = workService.create(userId, new CreateWorkRequest(siteId, LocalDate.of(2026, 10, 29),
+                "우리 현장 용접", null, WorkType.HOT, from, from.plusHours(2), 2)).workId();
+        Long myPermit = permitService.create(userId, new CreatePermitRequest(myWork, PermitType.HOT, from,
+                from.plusHours(2), "김감시", null, null)).permitId();
+
+        expectCode(() -> service.startWorkRegister(userId,
+                new StartWorkRegisterRequest(siteId, null, otherPermit, "판정해 줘")), ErrorCode.NOT_FOUND);
+        expectCode(() -> service.startWorkRegister(userId,
+                new StartWorkRegisterRequest(siteId, null, 999_999_999L, "판정해 줘")), ErrorCode.NOT_FOUND);
+
+        AgentRunStarted ok = service.startWorkRegister(userId, new StartWorkRegisterRequest(siteId, null, myPermit, "판정해 줘"));
+        assertThat(jsonMapper.readValue(runRepository.findById(ok.runId()).orElseThrow().getInputJson(), RunInput.class)
+                .permitId()).isEqualTo(myPermit);
+    }
+
+    @Test
+    @DisplayName("응답이 끝내 오지 않은 실행: 다음 메시지를 보내면 실패로 정리하고 이어서 받는다")
+    void staleRunUnblocksConversation() {
+        AgentRunStarted stuck = send(null, "오늘 용접 작업 있어");
+        makeOld(stuck.runId());
+
+        AgentRunStarted next = send(stuck.conversationId(), "다시 보냄");
+
+        assertThat(next.runId()).isNotEqualTo(stuck.runId());
+        AgentRunDetail old = service.getRun(userId, stuck.runId());
+        assertThat(old.status()).isEqualTo(AgentRunStatus.FAILED);
+        assertThat(old.errorMessage()).startsWith("AGENT_TIMEOUT:");
+    }
+
+    @Test
+    @DisplayName("주기 정리: 오래 멈춘 실행만 FAILED, 방금 시작한 실행은 그대로")
+    void sweeper() {
+        AgentRunStarted stuck = send(null, "오늘 용접 작업 있어");
+        AgentRunStarted fresh = send(null, "방금 보낸 메시지");
+        makeOld(stuck.runId());
+
+        sweeper.sweep();
+        em.flush();
+        em.clear();
+
+        assertThat(service.getRun(userId, stuck.runId()).status()).isEqualTo(AgentRunStatus.FAILED);
+        assertThat(service.getRun(userId, fresh.runId()).status()).isEqualTo(AgentRunStatus.PROCESSING);
+    }
+
+    /** 실행 시작 시각을 1시간 전으로 (응답 대기 시간을 넘긴 것처럼) */
+    private void makeOld(Long runId) {
+        em.flush();
+        em.createNativeQuery("UPDATE agent_runs SET created_at = ?1 WHERE id = ?2")
+                .setParameter(1, LocalDateTime.now().minusHours(1))
+                .setParameter(2, runId)
+                .executeUpdate();
+        em.clear();
     }
 }

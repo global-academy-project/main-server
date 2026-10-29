@@ -31,6 +31,8 @@ public class AgentResultWriter {
     private static final Logger log = LoggerFactory.getLogger(AgentResultWriter.class);
     private static final String WAITING = "WAITING_INPUT";
     private static final String DONE = "DONE";
+    /** evidence_citations.kb_collection 허용 값 (DB ck_ev_kb_coll) */
+    private static final java.util.Set<String> KB_COLLECTIONS = java.util.Set.of("kb_accidents", "kb_guides");
 
     private final AgentRunRepository runRepository;
     private final AgentStepRepository stepRepository;
@@ -58,7 +60,7 @@ public class AgentResultWriter {
 
     @Transactional
     public void saveSuccess(Long runId, JsonNode data, int elapsedMs) {
-        AgentRun run = runRepository.findById(runId).orElse(null);
+        AgentRun run = runRepository.findForUpdate(runId).orElse(null);
         if (run == null || run.getStatus() != AgentRunStatus.PROCESSING) {
             log.warn("이미 끝났거나 없는 실행의 결과는 저장하지 않습니다. runId={}", runId);
             return;
@@ -93,7 +95,7 @@ public class AgentResultWriter {
 
     @Transactional
     public void saveFailure(Long runId, String code, String message, JsonNode steps, int elapsedMs) {
-        AgentRun run = runRepository.findById(runId).orElse(null);
+        AgentRun run = runRepository.findForUpdate(runId).orElse(null);
         if (run == null || run.getStatus() != AgentRunStatus.PROCESSING) {
             log.warn("이미 끝났거나 없는 실행의 실패는 저장하지 않습니다. runId={}", runId);
             return;
@@ -134,6 +136,7 @@ public class AgentResultWriter {
             }
             Map<String, Object> output = new LinkedHashMap<>();
             output.put("name", s.name());
+            output.put("status", s.status());
             output.put("output", s.output());
             if (s.errorCode() != null) {
                 output.put("errorCode", s.errorCode());
@@ -184,8 +187,8 @@ public class AgentResultWriter {
             }
             case "KB" -> {
                 EvidenceSourceType type = sourceTypeOf(c.sourceType());
-                if (type == null || c.kbCollection() == null) {
-                    log.info("KB 근거에 출처 종류·컬렉션이 없어 저장하지 않습니다 (output_json 에는 남음). refId={}", c.refId());
+                if (type == null || !type.requiresKbChunk() || !KB_COLLECTIONS.contains(c.kbCollection())) {
+                    log.info("KB 근거의 출처 종류·컬렉션이 없거나 허용 값이 아니라 저장하지 않습니다 (output_json 에는 남음). refId={}", c.refId());
                     return null;
                 }
                 return EvidenceCitation.fromKb(runId, null, type, c.kbCollection(), c.refId(), title, null, null, c.snippet());

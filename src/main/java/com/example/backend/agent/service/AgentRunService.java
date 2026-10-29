@@ -9,6 +9,8 @@ import com.example.backend.agent.repository.*;
 import com.example.backend.common.exception.BusinessException;
 import com.example.backend.common.exception.ErrorCode;
 import com.example.backend.common.type.NetworkMode;
+import com.example.backend.permit.entity.Permit;
+import com.example.backend.permit.repository.PermitRepository;
 import com.example.backend.site.entity.Site;
 import com.example.backend.site.repository.SiteRepository;
 import com.example.backend.site.service.SiteGuard;
@@ -20,6 +22,7 @@ import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.json.JsonMapper;
 
 import java.time.Clock;
+import java.time.Duration;
 import java.time.LocalDateTime;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -30,6 +33,8 @@ import java.util.Map;
  * 흐름: ① 한 트랜잭션에서 대화·사용자 메시지·실행(PROCESSING) 저장 + 이벤트 → ② 커밋 후 AI 서버 호출 (리스너)
  *      → ③ 결과 저장 (AgentResultWriter). 화면은 실행 상태를 조회(폴링)한다.
  * 대화는 만든 사람만 본다. 현장 권한이 없어지면 그 현장 대화도 못 본다.
+ * 응답이 끝내 오지 않은 실행(서버 재시작, 비동기 작업 유실)은 stale-after-seconds 가 지나면 실패로 정리한다
+ * (여기서 다음 메시지를 받을 때, 그리고 AgentRunSweeper 가 주기적으로).
  */
 @Service
 public class AgentRunService {
@@ -41,16 +46,21 @@ public class AgentRunService {
     private final EvidenceCitationRepository citationRepository;
     private final SiteRepository siteRepository;
     private final SiteGuard siteGuard;
+    private final PermitRepository permitRepository;
+    private final AgentResultWriter writer;
     private final ApplicationEventPublisher events;
     private final JsonMapper jsonMapper;
     private final Clock clock;
     private final NetworkMode networkMode;
+    private final Duration staleAfter;
 
     public AgentRunService(AgentConversationRepository conversationRepository, AgentMessageRepository messageRepository,
                            AgentRunRepository runRepository, AgentStepRepository stepRepository,
                            EvidenceCitationRepository citationRepository, SiteRepository siteRepository,
-                           SiteGuard siteGuard, ApplicationEventPublisher events, JsonMapper jsonMapper, Clock clock,
-                           @Value("${app.agent.network-mode}") NetworkMode networkMode) {
+                           SiteGuard siteGuard, PermitRepository permitRepository, AgentResultWriter writer,
+                           ApplicationEventPublisher events, JsonMapper jsonMapper, Clock clock,
+                           @Value("${app.agent.network-mode}") NetworkMode networkMode,
+                           @Value("${app.agent.stale-after-seconds}") long staleAfterSeconds) {
         this.conversationRepository = conversationRepository;
         this.messageRepository = messageRepository;
         this.runRepository = runRepository;
@@ -58,10 +68,13 @@ public class AgentRunService {
         this.citationRepository = citationRepository;
         this.siteRepository = siteRepository;
         this.siteGuard = siteGuard;
+        this.permitRepository = permitRepository;
+        this.writer = writer;
         this.events = events;
         this.jsonMapper = jsonMapper;
         this.clock = clock;
         this.networkMode = networkMode;
+        this.staleAfter = Duration.ofSeconds(staleAfterSeconds);
     }
 
     /** 작업 등록 대화 메시지. 새 대화면 만들고, 이어지는 대화면 직전 실행의 slots 를 그대로 이어 보낸다 */
@@ -71,6 +84,9 @@ public class AgentRunService {
         Site site = siteRepository.findById(r.siteId()).orElseThrow(() -> new BusinessException(ErrorCode.SITE_NOT_FOUND));
         LocalDateTime now = LocalDateTime.now(clock);
         String message = r.message().trim();
+        if (r.permitId() != null) {
+            requirePermitOfSite(r.permitId(), r.siteId());
+        }
 
         AgentConversation conv;
         JsonNode slots = null;
@@ -81,8 +97,12 @@ public class AgentRunService {
                     .filter(c -> c.getUserId().equals(userId) && c.getSiteId().equals(r.siteId()) && c.getDeletedAt() == null)
                     .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND, "대화를 찾을 수 없습니다."));
             List<AgentRun> runs = runRepository.findByConversationIdOrderByIdAsc(conv.getId());
-            if (!runs.isEmpty() && runs.get(runs.size() - 1).getStatus() == AgentRunStatus.PROCESSING) {
-                throw new BusinessException(ErrorCode.INVALID_STATE, "이전 메시지를 처리하고 있습니다. 끝난 뒤 다시 보내 주세요.");
+            AgentRun last = runs.isEmpty() ? null : runs.get(runs.size() - 1);
+            if (last != null && last.getStatus() == AgentRunStatus.PROCESSING) {
+                if (!isStale(last, now)) {
+                    throw new BusinessException(ErrorCode.INVALID_STATE, "이전 메시지를 처리하고 있습니다. 끝난 뒤 다시 보내 주세요.");
+                }
+                failStale(last, now);   // 응답이 끝내 오지 않은 실행은 실패로 정리하고 이어서 받는다
             }
             slots = lastSlots(runs);
         }
@@ -130,6 +150,27 @@ public class AgentRunService {
                 .filter(m -> m.getRole() != MessageRole.TOOL)
                 .map(m -> new AgentMessageItem(m.getId(), m.getSeq(), m.getRole(), m.getContent(), m.getRunId(), m.getCreatedAt()))
                 .toList();
+    }
+
+    /** 응답 대기 시간이 지나도록 PROCESSING 인 실행인가 */
+    boolean isStale(AgentRun run, LocalDateTime now) {
+        return run.getCreatedAt() != null && run.getCreatedAt().plus(staleAfter).isBefore(now);
+    }
+
+    /** 멈춘 실행을 실패로 (같은 트랜잭션) */
+    void failStale(AgentRun run, LocalDateTime now) {
+        int elapsed = (int) Math.min(Integer.MAX_VALUE, Duration.between(run.getCreatedAt(), now).toMillis());
+        writer.saveFailure(run.getId(), "AGENT_TIMEOUT", "AI 서버 응답이 없어 처리를 중단했습니다.", null, elapsed);
+    }
+
+    /** 판정을 저장할 허가서는 이 현장 것이고, 아직 고칠 수 있는 상태여야 한다 */
+    private void requirePermitOfSite(Long permitId, Long siteId) {
+        Permit permit = permitRepository.findById(permitId)
+                .filter(p -> p.getSiteId().equals(siteId))
+                .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND, "허가서를 찾을 수 없습니다."));
+        if (!permit.getStatus().isEditable()) {
+            throw new BusinessException(ErrorCode.INVALID_STATE, "승인 요청된 허가서는 다시 판정할 수 없습니다.");
+        }
     }
 
     /** 직전에 끝난(되묻기·완료) 실행 응답의 slots. 실패한 실행은 건너뛴다 */

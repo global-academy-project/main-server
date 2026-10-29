@@ -77,3 +77,5 @@ app:
     connect-timeout-seconds: 2
     read-timeout-seconds: 120
     network-mode: ${NETWORK_ENV:OPEN}
+    stale-after-seconds: 180      # 응답 대기(120초)보다 길게. 이보다 오래 PROCESSING 이면 실패로 정리
+    sweep-interval-ms: 60000
