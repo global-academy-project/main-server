@@ -15,6 +15,7 @@ GET {{host}}/api/v1/users/me
 Authorization: Bearer {{adminToken}}
 
 ### 3. [웹] 시나리오 B: 산소 17.5% → result BLOCK, evaluationId null (미리 확인, 저장 안 함)
+###    checks 5건: CONFINED_O2_RANGE 만 FAIL, 나머지 PASS (통과 항목도 actual·expected 가 온다)
 POST {{host}}/api/v1/rules/check
 Authorization: Bearer {{adminToken}}
 Content-Type: application/json
@@ -22,7 +23,7 @@ Content-Type: application/json
 {"siteId": 1, "workType": "CONFINED",
  "input": {"measurement": {"O2": 17.5, "CO2": 0.8, "CO": 5, "H2S": 0, "LEL": 0}}}
 
-### 4. [웹] 모두 정상 → PASS, violations []
+### 4. [웹] 모두 정상 → PASS, violations [], checks 5건 모두 PASS
 POST {{host}}/api/v1/rules/check
 Authorization: Bearer {{adminToken}}
 Content-Type: application/json
@@ -31,6 +32,7 @@ Content-Type: application/json
  "input": {"measurement": {"O2": 20.9, "CO2": 0.04, "CO": 0, "H2S": 0, "LEL": 0}}}
 
 ### 5. [웹] 측정값 누락(CO 없음) + 이름 오타(O3) → BLOCK "측정값이 없습니다.", unusedFields ["measurement.O3"]
+###    checks: CONFINED_CO_MAX 만 MISSING (actual null)
 POST {{host}}/api/v1/rules/check
 Authorization: Bearer {{adminToken}}
 Content-Type: application/json
