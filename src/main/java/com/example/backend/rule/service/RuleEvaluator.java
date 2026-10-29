@@ -31,6 +31,7 @@ import java.util.TreeSet;
  *  - REQUIRED: null, 빈 문자열, 빈 목록이면 위반
  *  - IN: allowed 목록 중 하나여야 함 (값이 없으면 위반). 예/아니오 확인 항목은 allowed = [true]
  *  - 결과는 위반 중 가장 무거운 것: BLOCK > WARN > (없으면) PASS
+ *  - checks: 적용한 규칙 전부의 PASS / FAIL / MISSING (규칙 코드 순). FAIL·MISSING 은 findings 와 같은 규칙
  */
 @Component
 public class RuleEvaluator {
@@ -46,15 +47,19 @@ public class RuleEvaluator {
     public Judgement evaluate(List<Rule> rules, Map<String, Object> input) {
         Map<String, Object> safeInput = input == null ? Map.of() : input;
         List<Finding> findings = new ArrayList<>();
+        List<RuleCheck> checks = new ArrayList<>();
         Set<String> usedPaths = new HashSet<>();
 
         for (Rule rule : rules) {
             usedPaths.add(rule.getTarget());
-            Finding finding = check(rule, lookup(safeInput, rule.getTarget()));
+            Object raw = lookup(safeInput, rule.getTarget());
+            Finding finding = check(rule, raw);
             if (finding != null) {
                 findings.add(finding);
             }
+            checks.add(toCheck(rule, raw, finding));
         }
+        checks.sort(Comparator.comparing((RuleCheck c) -> c.rule().getRuleCode()));
 
         findings.sort(Comparator
                 .comparing((Finding f) -> f.severity() == RuleSeverity.BLOCK ? 0 : 1)
@@ -64,7 +69,17 @@ public class RuleEvaluator {
         collectLeafPaths(safeInput, "", unused);
         unused.removeAll(usedPaths);
 
-        return new Judgement(resultOf(findings), rules.size(), List.copyOf(findings), List.copyOf(unused));
+        return new Judgement(resultOf(findings), rules.size(), List.copyOf(findings), List.copyOf(unused),
+                List.copyOf(checks));
+    }
+
+    /** 규칙 하나의 PASS / FAIL / MISSING. 위반이면 finding 의 값·문구를 그대로 쓴다 */
+    private RuleCheck toCheck(Rule rule, Object raw, Finding finding) {
+        if (finding == null) {
+            return new RuleCheck(rule, CheckStatus.PASS, text(raw), expectedText(rule), null, null);
+        }
+        CheckStatus status = isBlank(raw) ? CheckStatus.MISSING : CheckStatus.FAIL;
+        return new RuleCheck(rule, status, finding.actual(), finding.expected(), finding.message(), finding.action());
     }
 
     // ------------------------------------------------------------------ 규칙 하나
