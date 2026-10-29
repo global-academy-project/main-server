@@ -81,6 +81,21 @@ class PermitFlowIntegrationTest {
     }
 
     @Test
+    @DisplayName("판정 규칙이 없는 허가(고소)는 판정이 PASS여도 승인 요청할 수 없다")
+    void noRules_cannotSubmit() {   // 고소 규칙을 추가하면 규칙이 없는 다른 종류로 바꾼다
+        Long id = permitService.create(adminId, new CreatePermitRequest(workId, PermitType.HEIGHT, FROM, TO,
+                null, "이반장", Map.of())).permitId();
+
+        PermitCheckResponse r = permitService.check(adminId, id);
+
+        assertThat(r.evaluation().result()).isEqualTo(EvaluationResult.PASS);
+        assertThat(r.evaluation().rulesApplied()).isZero();
+        assertThat(r.canSubmit()).isFalse();
+        assertThat(permitService.get(adminId, id).canSubmit()).isFalse();
+        expectCode(() -> permitService.submit(adminId, id), ErrorCode.INVALID_STATE);
+    }
+
+    @Test
     @DisplayName("작성: DRAFT, 허가번호 HOT-20261029-001, 같은 작업에 같은 종류 두 번은 안 됨")
     void create() {
         PermitResponse p = createHotPermit();
