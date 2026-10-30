@@ -165,6 +165,7 @@ public class Permit {
     public String getWatcherName() { return watcherName; }
     public String getSupervisorName() { return supervisorName; }
     public String getFormData() { return formData; }
+    public String getFormSchemaVersion() { return formSchemaVersion; }
     public Long getLastEvaluationId() { return lastEvaluationId; }
     public Long getWriterId() { return writerId; }
     /** 에이전트가 만든 허가서면 실행 id */
