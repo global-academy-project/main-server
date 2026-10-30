@@ -14,4 +14,7 @@ public interface SiteMemberRepository extends JpaRepository<SiteMember, SiteMemb
     List<SiteMember> findByUserIdIn(Collection<Long> userIds);
 
     List<SiteMember> findByUserIdAndStatus(Long userId, String status);
+
+    /** 이 현장의 권한자 (결재 알림 받을 사람 찾기) */
+    List<SiteMember> findBySiteIdAndStatus(Long siteId, String status);
 }

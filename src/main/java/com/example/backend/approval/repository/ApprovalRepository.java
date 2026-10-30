@@ -27,6 +27,9 @@ public interface ApprovalRepository extends JpaRepository<Approval, Long> {
     Page<Approval> findBySiteIdAndStatusOrderByRequestedAtAscIdAsc(Long siteId, ApprovalStatus status,
                                                                   Pageable pageable);
 
+    /** 내가 요청한 문서 (최근 순) */
+    Page<Approval> findBySiteIdAndRequestedByOrderByRequestedAtDescIdDesc(Long siteId, Long requestedBy, Pageable pageable);
+
     /** 결정할 때 같은 결재를 두 사람이 동시에 처리하지 않게 */
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("select a from Approval a where a.id = :id")
