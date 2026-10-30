@@ -267,6 +267,24 @@ class AgentRunFlowDbTest {
         assertThat(service.getRun(userId, fresh.runId()).status()).isEqualTo(AgentRunStatus.PROCESSING);
     }
 
+    @Test
+    @DisplayName("정리기가 실패 처리한 뒤 늦게 온 AI 응답은 저장하지 않는다 (FAILED 유지)")
+    void lateResultAfterSweep() {
+        AgentRunStarted run = send(null, "오늘 용접 작업 있어");
+        makeOld(run.runId());
+        sweeper.sweep();
+        em.flush();
+
+        writer.saveSuccess(run.runId(), jsonMapper.readTree(DONE), 130_000);   // 늦게 도착
+        em.flush();
+        em.clear();
+
+        AgentRunDetail d = service.getRun(userId, run.runId());
+        assertThat(d.status()).isEqualTo(AgentRunStatus.FAILED);
+        assertThat(d.errorMessage()).contains("AGENT_TIMEOUT");
+        assertThat(d.steps()).isEmpty();
+    }
+
     /** 실행 시작 시각을 1시간 전으로 (응답 대기 시간을 넘긴 것처럼) */
     private void makeOld(Long runId) {
         em.flush();

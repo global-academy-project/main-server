@@ -1,6 +1,7 @@
 package com.example.backend.auth.jwt;
 
 import com.example.backend.common.exception.ErrorCode;
+import com.example.backend.common.response.ErrorResponseWriter;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import org.springframework.security.core.AuthenticationException;
@@ -17,9 +18,6 @@ public class JwtAuthenticationEntryPoint implements AuthenticationEntryPoint {
         Object attr = request.getAttribute(JwtAuthenticationFilter.ERROR_ATTRIBUTE);
         ErrorCode code = attr instanceof ErrorCode c ? c : ErrorCode.UNAUTHORIZED;
 
-        response.setStatus(code.getStatus().value());
-        response.setContentType("application/json;charset=UTF-8");
-        response.getWriter().write("{\"success\":false,\"error\":{\"code\":\"" + code.name()
-                + "\",\"message\":\"" + code.getDefaultMessage() + "\",\"details\":[]}}");
+        ErrorResponseWriter.write(response, code);
     }
 }

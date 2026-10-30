@@ -70,6 +70,21 @@ class AgentEntitiesTest {
     }
 
     @Test
+    @DisplayName("실행: 끝난(DONE·FAILED) 실행은 결과를 다시 쓸 수 없다 (늦은 응답·시간 초과 정리 덮어쓰기 방지)")
+    void finishedRunIsFinal() {
+        LocalDateTime now = LocalDateTime.of(2026, 10, 30, 9, 0);
+        AgentRun done = new AgentRun(1L, 1L, null, AgentTaskType.WORK_REGISTER, AgentMode.VERIFY, NetworkMode.OPEN, null);
+        done.complete("{}", "model-x", null, 1000, null, null, now);
+        assertThatThrownBy(() -> done.fail("AGENT_TIMEOUT: 응답 없음", 10, now)).isInstanceOf(IllegalStateException.class);
+        assertThatThrownBy(() -> done.waitForInput("{}", null, null, 10, null, null)).isInstanceOf(IllegalStateException.class);
+
+        AgentRun failed = new AgentRun(1L, 1L, null, AgentTaskType.WORK_REGISTER, AgentMode.VERIFY, NetworkMode.OPEN, null);
+        failed.fail("AGENT_TIMEOUT: 응답 없음", 180_000, now);
+        assertThatThrownBy(() -> failed.complete("{}", null, null, 10, null, null, now)).isInstanceOf(IllegalStateException.class);
+        assertThat(failed.getStatus()).isEqualTo(AgentRunStatus.FAILED);
+    }
+
+    @Test
     @DisplayName("단계: 도구 이름은 TOOL_CALL 에만, 정해진 도구만, 순번은 1부터")
     void step() {
         assertThatThrownBy(() -> new AgentStep(1L, 1, AgentStepType.TOOL_CALL, null, null, null, null, null))
