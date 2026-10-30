@@ -129,6 +129,30 @@ public class Permit {
         this.status = PermitStatus.PENDING;
     }
 
+    /** 결재 승인 (마지막 단계까지) */
+    public void approve() {
+        requirePending();
+        this.status = PermitStatus.APPROVED;
+    }
+
+    /** 결재 반려. 다시 쓰려면 새 판(revision)을 만든다 (DB 설계: 반려된 판은 그대로 보존) */
+    public void reject() {
+        requirePending();
+        this.status = PermitStatus.REJECTED;
+    }
+
+    /** 요청자가 결재를 회수 → 다시 작성 중. 내용은 그대로라 최근 판정도 그대로 유효 */
+    public void withdraw() {
+        requirePending();
+        this.status = PermitStatus.DRAFT;
+    }
+
+    private void requirePending() {
+        if (status != PermitStatus.PENDING) {
+            throw new IllegalStateException("승인 요청된 허가서가 아닙니다 (현재 " + status + ").");
+        }
+    }
+
     public Long getId() { return id; }
     public Long getSiteId() { return siteId; }
     public Long getWorkId() { return workId; }

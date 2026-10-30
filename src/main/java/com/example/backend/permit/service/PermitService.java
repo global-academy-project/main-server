@@ -1,5 +1,7 @@
 package com.example.backend.permit.service;
 
+import com.example.backend.approval.entity.ApprovalTarget;
+import com.example.backend.approval.service.ApprovalService;
 import com.example.backend.common.exception.BusinessException;
 import com.example.backend.common.exception.ErrorCode;
 import com.example.backend.permit.dto.AddMeasurementsRequest;
@@ -66,13 +68,15 @@ public class PermitService {
     private final RuleViolationRepository violationRepository;
     private final RuleRepository ruleRepository;
     private final SiteGuard siteGuard;
+    private final ApprovalService approvalService;
     private final JsonMapper jsonMapper;
     private final Clock clock;
 
     public PermitService(PermitRepository permitRepository, PermitMeasurementRepository measurementRepository,
                          WorkRepository workRepository, RuleCheckService ruleCheckService,
                          RuleEvaluationRepository evaluationRepository, RuleViolationRepository violationRepository,
-                         RuleRepository ruleRepository, SiteGuard siteGuard, JsonMapper jsonMapper, Clock clock) {
+                         RuleRepository ruleRepository, SiteGuard siteGuard, ApprovalService approvalService,
+                         JsonMapper jsonMapper, Clock clock) {
         this.permitRepository = permitRepository;
         this.measurementRepository = measurementRepository;
         this.workRepository = workRepository;
@@ -81,6 +85,7 @@ public class PermitService {
         this.violationRepository = violationRepository;
         this.ruleRepository = ruleRepository;
         this.siteGuard = siteGuard;
+        this.approvalService = approvalService;
         this.jsonMapper = jsonMapper;
         this.clock = clock;
     }
@@ -163,7 +168,7 @@ public class PermitService {
                 canSubmit(permit, result.result(), result.rulesApplied()), result);
     }
 
-    /** 승인 요청. 최근 판정이 없거나(내용이 바뀜) BLOCK 이면 INVALID_STATE */
+    /** 승인 요청. 최근 판정이 없거나(내용이 바뀜) BLOCK 이면 INVALID_STATE. 결재선을 복사해 결재를 만든다 (계획서 7-5장) */
     @Transactional
     public PermitResponse submit(Long userId, Long permitId) {
         Permit permit = load(userId, permitId);
@@ -186,6 +191,7 @@ public class PermitService {
         }
         permit.submit();
         permitRepository.saveAndFlush(permit);
+        approvalService.request(ApprovalTarget.PERMIT, permit.getId(), permit.getSiteId(), userId);
         return toResponse(permit);
     }
 

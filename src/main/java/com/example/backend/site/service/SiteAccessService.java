@@ -12,6 +12,7 @@ import org.springframework.transaction.annotation.Transactional;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 
@@ -47,6 +48,11 @@ public class SiteAccessService {
                 .map(m -> new SiteAccess(m.getSiteId(), sites.get(m.getSiteId()).getName(), m.getRole().name()))
                 .sorted(Comparator.comparing(SiteAccess::name))
                 .toList();
+    }
+
+    /** 이 현장에서의 역할: ADMIN(회사 관리자) / WRITER / APPROVER / SITE_ADMIN. 권한이 없으면 비어 있음 */
+    public Optional<String> roleAt(User user, Long siteId) {
+        return accessibleSites(user).stream().filter(s -> s.siteId().equals(siteId)).map(SiteAccess::role).findFirst();
     }
 
     public boolean canAccess(User user, Long siteId) {
