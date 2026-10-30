@@ -3,6 +3,7 @@ package com.example.backend.agent.service;
 import com.example.backend.agent.dto.AgentMessageItem;
 import com.example.backend.agent.dto.AgentRunDetail;
 import com.example.backend.agent.dto.AgentRunStarted;
+import com.example.backend.agent.dto.StartRecordQueryRequest;
 import com.example.backend.agent.dto.StartWorkRegisterRequest;
 import com.example.backend.agent.entity.*;
 import com.example.backend.agent.repository.*;
@@ -29,7 +30,7 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * 에이전트 실행 시작과 조회 (작업 등록 대화).
+ * 에이전트 실행 시작과 조회 (작업 등록 대화, 기록 질문).
  * 흐름: ① 한 트랜잭션에서 대화·사용자 메시지·실행(PROCESSING) 저장 + 이벤트 → ② 커밋 후 AI 서버 호출 (리스너)
  *      → ③ 결과 저장 (AgentResultWriter). 화면은 실행 상태를 조회(폴링)한다.
  * 대화는 만든 사람만 본다. 현장 권한이 없어지면 그 현장 대화도 못 본다.
@@ -88,34 +89,72 @@ public class AgentRunService {
             requirePermitOfSite(r.permitId(), r.siteId());
         }
 
-        AgentConversation conv;
-        JsonNode slots = null;
-        if (r.conversationId() == null) {
-            conv = conversationRepository.saveAndFlush(new AgentConversation(r.siteId(), userId, message, null, null));
-        } else {
-            conv = conversationRepository.findForUpdate(r.conversationId())
-                    .filter(c -> c.getUserId().equals(userId) && c.getSiteId().equals(r.siteId()) && c.getDeletedAt() == null)
-                    .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND, "대화를 찾을 수 없습니다."));
-            List<AgentRun> runs = runRepository.findByConversationIdOrderByIdAsc(conv.getId());
-            AgentRun last = runs.isEmpty() ? null : runs.get(runs.size() - 1);
-            if (last != null && last.getStatus() == AgentRunStatus.PROCESSING) {
-                if (!isStale(last, now)) {
-                    throw new BusinessException(ErrorCode.INVALID_STATE, "이전 메시지를 처리하고 있습니다. 끝난 뒤 다시 보내 주세요.");
-                }
-                failStale(last, now);   // 응답이 끝내 오지 않은 실행은 실패로 정리하고 이어서 받는다
-            }
-            slots = lastSlots(runs);
-        }
+        Turn turn = openTurn(userId, r.siteId(), r.conversationId(), message, AgentTaskType.WORK_REGISTER, now);
 
         Map<String, Object> input = new LinkedHashMap<>();
         input.put("message", message);
-        input.put("slots", slots);
+        input.put("slots", lastOutputField(turn.runs(), "slots"));
         input.put("permitId", r.permitId());
-        AgentRun run = runRepository.saveAndFlush(new AgentRun(r.siteId(), userId, conv.getId(),
-                AgentTaskType.WORK_REGISTER, AgentMode.valueOf(site.getMode().name()), networkMode,
-                jsonMapper.writeValueAsString(input)));
-        messageRepository.save(AgentMessage.user(conv.getId(), conv.nextSeq(now), message, run.getId()));
+        return startRun(turn.conversation(), userId, site, AgentTaskType.WORK_REGISTER, input, message, now);
+    }
 
+    /**
+     * 기록 질문 (D 확정 문서 5-1-1). 작업 등록과 같은 흐름이고, 이어 묻기면 직전 응답의 context 를 그대로 보낸다.
+     * 업무 기록은 읽기만 한다 (AI 서버가 search_records 로 조회).
+     */
+    @Transactional
+    public AgentRunStarted startRecordQuery(Long userId, StartRecordQueryRequest r) {
+        siteGuard.requireAccess(userId, r.siteId());
+        Site site = siteRepository.findById(r.siteId()).orElseThrow(() -> new BusinessException(ErrorCode.SITE_NOT_FOUND));
+        LocalDateTime now = LocalDateTime.now(clock);
+        String message = r.message().trim();
+        Turn turn = openTurn(userId, r.siteId(), r.conversationId(), message, AgentTaskType.RECORD_QUERY, now);
+
+        Map<String, Object> input = new LinkedHashMap<>();
+        input.put("message", message);
+        input.put("context", lastOutputField(turn.runs(), "context"));
+        return startRun(turn.conversation(), userId, site, AgentTaskType.RECORD_QUERY, input, message, now);
+    }
+
+    /** 대화 하나와 그 대화의 이전 실행들 */
+    private record Turn(AgentConversation conversation, List<AgentRun> runs) {
+    }
+
+    /**
+     * 새 대화를 만들거나 이어 받을 대화를 잠근다. 이전 메시지가 처리 중이면 받지 않고(멈춘 실행은 실패로 정리),
+     * 다른 종류(작업 등록 ↔ 기록 질문) 대화에는 이어 보낼 수 없다 (탭마다 대화가 따로, 계획서 7-5장).
+     */
+    private Turn openTurn(Long userId, Long siteId, Long conversationId, String message, AgentTaskType taskType,
+                          LocalDateTime now) {
+        if (conversationId == null) {
+            return new Turn(conversationRepository.saveAndFlush(new AgentConversation(siteId, userId, message, null, null)),
+                    List.of());
+        }
+        AgentConversation conv = conversationRepository.findForUpdate(conversationId)
+                .filter(c -> c.getUserId().equals(userId) && c.getSiteId().equals(siteId) && c.getDeletedAt() == null)
+                .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND, "대화를 찾을 수 없습니다."));
+        List<AgentRun> runs = runRepository.findByConversationIdOrderByIdAsc(conv.getId());
+        if (!runs.isEmpty() && runs.get(0).getTaskType() != taskType) {
+            throw new BusinessException(ErrorCode.INVALID_STATE, taskType == AgentTaskType.RECORD_QUERY
+                    ? "작업 등록 대화에는 기록 질문을 이어 보낼 수 없습니다. 기록 질문 탭에서 새로 질문해 주세요."
+                    : "기록 질문 대화에는 작업 등록을 이어 보낼 수 없습니다. 작업 등록 탭에서 새로 시작해 주세요.");
+        }
+        AgentRun last = runs.isEmpty() ? null : runs.get(runs.size() - 1);
+        if (last != null && last.getStatus() == AgentRunStatus.PROCESSING) {
+            if (!isStale(last, now)) {
+                throw new BusinessException(ErrorCode.INVALID_STATE, "이전 메시지를 처리하고 있습니다. 끝난 뒤 다시 보내 주세요.");
+            }
+            failStale(last, now);   // 응답이 끝내 오지 않은 실행은 실패로 정리하고 이어서 받는다
+        }
+        return new Turn(conv, runs);
+    }
+
+    /** 실행(PROCESSING) + 사용자 메시지 저장, 커밋 후 AI 서버 호출 이벤트 */
+    private AgentRunStarted startRun(AgentConversation conv, Long userId, Site site, AgentTaskType taskType,
+                                     Map<String, Object> input, String message, LocalDateTime now) {
+        AgentRun run = runRepository.saveAndFlush(new AgentRun(site.getId(), userId, conv.getId(), taskType,
+                AgentMode.valueOf(site.getMode().name()), networkMode, jsonMapper.writeValueAsString(input)));
+        messageRepository.save(AgentMessage.user(conv.getId(), conv.nextSeq(now), message, run.getId()));
         events.publishEvent(new AgentRunRequestedEvent(run.getId()));
         return new AgentRunStarted(conv.getId(), run.getId(), run.getStatus());
     }
@@ -181,14 +220,14 @@ public class AgentRunService {
         }
     }
 
-    /** 직전에 끝난(되묻기·완료) 실행 응답의 slots. 실패한 실행은 건너뛴다 */
-    private JsonNode lastSlots(List<AgentRun> runs) {
+    /** 직전에 끝난(되묻기·완료) 실행 응답의 필드 (작업 등록 slots, 기록 질문 context). 실패한 실행은 건너뛴다 */
+    private JsonNode lastOutputField(List<AgentRun> runs, String field) {
         for (int i = runs.size() - 1; i >= 0; i--) {
             AgentRun run = runs.get(i);
             if ((run.getStatus() == AgentRunStatus.WAITING_INPUT || run.getStatus() == AgentRunStatus.DONE)
                     && run.getOutputJson() != null) {
-                JsonNode slots = jsonMapper.readTree(run.getOutputJson()).get("slots");
-                return slots == null || slots.isNull() ? null : slots;
+                JsonNode value = jsonMapper.readTree(run.getOutputJson()).get(field);
+                return value == null || value.isNull() ? null : value;
             }
         }
         return null;

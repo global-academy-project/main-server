@@ -10,6 +10,8 @@ import tools.jackson.databind.json.JsonMapper;
  *  - 첫 메시지(slots 없음): WAITING_INPUT + 되묻기
  *  - 다음 메시지: DONE + 단계·규칙 근거·승인 차단 사유 (초안 drafts 는 비움)
  * 응답 모양은 ai-model WorkRegisterResult 와 같다.
+ * 기록 질문(recordQuery)은 실제 기록을 조회하지 않고 질문을 그대로 되돌려 주는 DONE 답변만 돌려준다
+ * (화면·저장 흐름 확인용. 실제 조회는 AI 서버가 search_records 를 불러야 한다).
  */
 @Component
 @ConditionalOnProperty(name = "app.agent.client", havingValue = "mock", matchIfMissing = true)
@@ -51,6 +53,23 @@ public class MockAgentClient implements AgentClient {
                 "input": {}, "output": {}, "elapsedMs": 7}]}
             """;
 
+    private static final String RECORD_DONE = """
+            {"runStatus": "DONE",
+             "answer": "",
+             "queries": [{"queryType": "missing_measurements",
+                          "conditions": {"from": "2026-10-01", "to": "2026-10-31", "permitType": "HOT"},
+                          "total": 0, "truncated": false}],
+             "evidence": [],
+             "context": {"turns": 1},
+             "steps": [
+               {"seq": 1, "kind": "PHASE", "name": "query.plan", "toolName": null, "status": "OK",
+                "input": {}, "output": {"queryType": "missing_measurements"}, "elapsedMs": 4},
+               {"seq": 2, "kind": "TOOL", "name": "search_records", "toolName": "search_records", "status": "OK",
+                "input": {"queryType": "missing_measurements"}, "output": {"total": 0}, "elapsedMs": 12},
+               {"seq": 3, "kind": "PHASE", "name": "verification", "toolName": null, "status": "OK",
+                "input": {}, "output": {}, "elapsedMs": 2}]}
+            """;
+
     private final JsonMapper jsonMapper;
 
     public MockAgentClient(JsonMapper jsonMapper) {
@@ -61,6 +80,13 @@ public class MockAgentClient implements AgentClient {
     public AgentReply workRegister(WorkRegisterCall call) {
         boolean first = call.slots() == null || call.slots().isNull();
         JsonNode data = jsonMapper.readTree(first ? ASK : DONE);
+        return new AgentReply(data);
+    }
+
+    @Override
+    public AgentReply recordQuery(RecordQueryCall call) {
+        tools.jackson.databind.node.ObjectNode data = (tools.jackson.databind.node.ObjectNode) jsonMapper.readTree(RECORD_DONE);
+        data.put("answer", "[mock] \"" + call.message() + "\" 질문을 받았습니다. 실제 기록 조회는 AI 서버(기록 질문 에이전트) 연결 후 됩니다.");
         return new AgentReply(data);
     }
 }

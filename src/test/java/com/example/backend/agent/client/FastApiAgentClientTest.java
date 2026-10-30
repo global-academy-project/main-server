@@ -30,15 +30,17 @@ class FastApiAgentClientTest {
     private FastApiAgentClient start(int status, String body, AtomicReference<String> seenBody,
                                      AtomicReference<String> seenToken) throws IOException {
         server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
-        server.createContext(FastApiAgentClient.WORK_REGISTER_PATH, ex -> {
-            seenBody.set(new String(ex.getRequestBody().readAllBytes(), StandardCharsets.UTF_8));
-            seenToken.set(ex.getRequestHeaders().getFirst("X-Internal-Token"));
-            byte[] out = body.getBytes(StandardCharsets.UTF_8);
-            ex.getResponseHeaders().add("Content-Type", "application/json");
-            ex.sendResponseHeaders(status, out.length);
-            ex.getResponseBody().write(out);
-            ex.close();
-        });
+        for (String path : new String[]{FastApiAgentClient.WORK_REGISTER_PATH, FastApiAgentClient.RECORD_QUERY_PATH}) {
+            server.createContext(path, ex -> {
+                seenBody.set(ex.getRequestURI().getPath() + " " + new String(ex.getRequestBody().readAllBytes(), StandardCharsets.UTF_8));
+                seenToken.set(ex.getRequestHeaders().getFirst("X-Internal-Token"));
+                byte[] out = body.getBytes(StandardCharsets.UTF_8);
+                ex.getResponseHeaders().add("Content-Type", "application/json");
+                ex.sendResponseHeaders(status, out.length);
+                ex.getResponseBody().write(out);
+                ex.close();
+            });
+        }
         server.start();
         return new FastApiAgentClient("http://127.0.0.1:" + server.getAddress().getPort(), 2, 5, TOKEN, jsonMapper);
     }
@@ -60,6 +62,22 @@ class FastApiAgentClientTest {
         assertThat(token.get()).isEqualTo(TOKEN);
         assertThat(body.get()).contains("\"runId\":345", "\"siteId\":5", "\"permitId\":null", "\"mode\":\"VERIFY\"",
                 "\"future\":1");   // slots 안의 모르는 필드도 그대로 전달
+    }
+
+    @Test
+    @DisplayName("기록 질문: record-query 경로에 runId·siteId·message·context·mode")
+    void recordQuery() throws IOException {
+        AtomicReference<String> body = new AtomicReference<>();
+        FastApiAgentClient client = start(200,
+                "{\"success\":true,\"data\":{\"runStatus\":\"DONE\",\"answer\":\"0건입니다.\"}}",
+                body, new AtomicReference<>());
+
+        AgentReply reply = client.recordQuery(new RecordQueryCall(77L, 5L, "지난달 차단된 허가 있어?",
+                jsonMapper.readTree("{\"turns\":1}"), "GUIDE"));
+
+        assertThat(reply.data().get("answer").asString()).isEqualTo("0건입니다.");
+        assertThat(body.get()).startsWith(FastApiAgentClient.RECORD_QUERY_PATH)
+                .contains("\"runId\":77", "\"siteId\":5", "\"context\":{\"turns\":1}", "\"mode\":\"GUIDE\"");
     }
 
     @Test
