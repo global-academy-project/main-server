@@ -13,6 +13,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.json.JsonMapper;
+import tools.jackson.databind.node.ObjectNode;
 
 import java.time.Clock;
 import java.time.LocalDateTime;
@@ -40,6 +41,7 @@ public class AgentResultWriter {
     private final AgentConversationRepository conversationRepository;
     private final AgentMessageRepository messageRepository;
     private final RuleRepository ruleRepository;
+    private final AgentDraftWriter draftWriter;
     private final JsonMapper jsonMapper;
     private final Clock clock;
 
@@ -47,13 +49,14 @@ public class AgentResultWriter {
                              EvidenceCitationRepository citationRepository,
                              AgentConversationRepository conversationRepository,
                              AgentMessageRepository messageRepository, RuleRepository ruleRepository,
-                             JsonMapper jsonMapper, Clock clock) {
+                             AgentDraftWriter draftWriter, JsonMapper jsonMapper, Clock clock) {
         this.runRepository = runRepository;
         this.stepRepository = stepRepository;
         this.citationRepository = citationRepository;
         this.conversationRepository = conversationRepository;
         this.messageRepository = messageRepository;
         this.ruleRepository = ruleRepository;
+        this.draftWriter = draftWriter;
         this.jsonMapper = jsonMapper;
         this.clock = clock;
     }
@@ -71,8 +74,20 @@ public class AgentResultWriter {
             return;
         }
 
-        int seq = saveSteps(run.getId(), d.steps());
         boolean waiting = WAITING.equals(d.runStatus());
+
+        // DONE 이면 초안을 업무 DB 에 작성 중(DRAFT)으로 저장. 초안 값이 맞지 않으면 아무것도 저장하지 않고 실패
+        SavedDrafts saved = SavedDrafts.nothing();
+        if (!waiting) {
+            try {
+                saved = draftWriter.save(run, data, permitIdOf(run));
+            } catch (AgentDraftWriter.DraftInvalidException e) {
+                failRun(run, "AI_BAD_RESPONSE: 초안을 저장할 수 없습니다. " + e.getMessage(), d.steps(), elapsedMs);
+                return;
+            }
+        }
+
+        int seq = saveSteps(run.getId(), d.steps());
         Map<String, Object> last = new LinkedHashMap<>();
         if (waiting) {
             last.put("ask", d.ask());
@@ -83,7 +98,10 @@ public class AgentResultWriter {
                 null, null, jsonMapper.writeValueAsString(last), AgentStepStatus.DONE, null));
         saveCitations(run.getId(), d.citations());
 
-        String output = jsonMapper.writeValueAsString(data);
+        String output = jsonMapper.writeValueAsString(withSaved(data, saved));
+        if (!saved.isEmpty()) {
+            run.linkTarget("WORK", saved.workId());
+        }
         LocalDateTime now = LocalDateTime.now(clock);
         if (waiting) {
             run.waitForInput(output, null, null, elapsedMs, null, null);
@@ -112,6 +130,24 @@ public class AgentResultWriter {
     }
 
     // ------------------------------------------------------------------ 내부
+
+    /** 실행 요청에 실린 허가서 id (대화가 허가서에 묶여 있을 때) */
+    private Long permitIdOf(AgentRun run) {
+        if (run.getInputJson() == null) {
+            return null;
+        }
+        return jsonMapper.readValue(run.getInputJson(), RunInput.class).permitId();
+    }
+
+    /** AI 응답 원본에 저장 결과("saved")를 붙인다. 화면이 저장된 작업·허가서로 이동할 수 있게 */
+    private JsonNode withSaved(JsonNode data, SavedDrafts saved) {
+        if (saved.isEmpty() || !(data instanceof ObjectNode object)) {
+            return data;
+        }
+        ObjectNode copy = object.deepCopy();
+        copy.set("saved", jsonMapper.valueToTree(saved));
+        return copy;
+    }
 
     private void failRun(AgentRun run, String error, List<WorkRegisterData.StepItem> steps, int elapsedMs) {
         saveSteps(run.getId(), steps);
