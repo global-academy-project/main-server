@@ -135,8 +135,16 @@ public class AgentRunService {
         List<AgentRunDetail.Citation> citations = citationRepository.findByRunIdOrderByIdAsc(run.getId()).stream()
                 .map(c -> new AgentRunDetail.Citation(c.getSourceType(), c.getTitle(), c.getLocator(), c.getUrl(), c.getSnippet()))
                 .toList();
-        return new AgentRunDetail(run.getId(), run.getConversationId(), run.getTaskType(), run.getStatus(), result,
+        Long permitId = run.getInputJson() == null ? null
+                : longOrNull(jsonMapper.readTree(run.getInputJson()).path("permitId"));
+        Long workId = "WORK".equals(run.getTargetType()) ? run.getTargetId() : null;
+        return new AgentRunDetail(run.getId(), run.getConversationId(), run.getSiteId(), permitId, workId,
+                run.getTaskType(), run.getStatus(), result,
                 run.getErrorMessage(), run.getTotalMs(), steps, citations, run.getCreatedAt(), run.getFinishedAt());
+    }
+
+    private static Long longOrNull(JsonNode node) {
+        return node.isIntegralNumber() ? node.asLong() : null;
     }
 
     /** 대화 메시지 목록 (만든 사람만). 도구 메시지는 화면에 보이지 않으므로 뺀다 */

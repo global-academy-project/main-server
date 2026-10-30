@@ -16,6 +16,9 @@ public interface RiskAssessmentRepository extends JpaRepository<RiskAssessment, 
 
     List<RiskAssessment> findByWorkIdOrderByRevisionDesc(Long workId);
 
+    /** 작업 목록: 여러 작업의 위험성평가 (모든 판) */
+    List<RiskAssessment> findByWorkIdIn(Collection<Long> workIds);
+
     /** 일일 평가가 참고할 구역의 정기·수시 평가 (예: 승인된 것, 최근 순) */
     List<RiskAssessment> findBySiteIdAndZoneIdAndAssessmentTypeInAndStatusOrderByAssessDateDesc(
             Long siteId, Long zoneId, Collection<AssessmentType> types, RiskStatus status);

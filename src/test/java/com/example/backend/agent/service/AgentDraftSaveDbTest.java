@@ -1,5 +1,6 @@
 package com.example.backend.agent.service;
 
+import com.example.backend.agent.dto.AgentRunDetail;
 import com.example.backend.agent.dto.AgentRunStarted;
 import com.example.backend.agent.dto.StartWorkRegisterRequest;
 import com.example.backend.agent.entity.AgentRun;
@@ -31,6 +32,11 @@ import com.example.backend.tbm.entity.TbmStatus;
 import com.example.backend.tbm.entity.TbmWork;
 import com.example.backend.tbm.repository.TbmRecordRepository;
 import com.example.backend.tbm.repository.TbmWorkRepository;
+import com.example.backend.tbm.dto.TbmResponse;
+import com.example.backend.tbm.service.TbmService;
+import com.example.backend.risk.service.RiskAssessmentService;
+import com.example.backend.work.dto.WorkListItem;
+import com.example.backend.work.service.WorkService;
 import com.example.backend.user.entity.User;
 import com.example.backend.user.repository.UserRepository;
 import com.example.backend.work.entity.Work;
@@ -112,6 +118,9 @@ class AgentDraftSaveDbTest {
     @Autowired UserRepository userRepository;
     @Autowired SiteRepository siteRepository;
     @Autowired JsonMapper jsonMapper;
+    @Autowired WorkService workService;
+    @Autowired TbmService tbmService;
+    @Autowired RiskAssessmentService riskService;
     @Autowired EntityManager em;
 
     private Long userId;
@@ -313,5 +322,53 @@ class AgentDraftSaveDbTest {
         assertThat(permitRepository.findTopByWorkIdAndPermitTypeOrderByRevisionDesc(work.getId(), PermitType.HOT)).isEmpty();
         assertThat(riskRepository.findTopByWorkIdOrderByRevisionDesc(work.getId())).isPresent();
         assertThat(saved(run).path("notes").toString()).contains("시작·종료 시각이 없어 만들지 않았습니다");
+    }
+
+    // ------------------------------------------------------------------ 저장된 초안 조회 (웹이 기다리던 API)
+
+    @Test
+    @DisplayName("DONE 후 조회: 실행 상세의 현장·작업, 작업 목록의 허가서·위험성평가·TBM 상태, 위험성평가·TBM 상세")
+    void lookups_afterDone() {
+        AgentRunStarted started = send(null, "내일 13시 화기작업");
+        Work work = workOf(finish(started, done("2026-11-02")));
+
+        AgentRunDetail detail = service.getRun(userId, started.runId());
+        assertThat(detail.siteId()).isEqualTo(siteId);
+        assertThat(detail.workId()).isEqualTo(work.getId());
+        assertThat(detail.permitId()).isNull();
+
+        List<WorkListItem> list = workService.list(userId, siteId, LocalDate.of(2026, 11, 2), null);
+        assertThat(list).singleElement().satisfies(item -> {
+            assertThat(item.workId()).isEqualTo(work.getId());
+            assertThat(item.permits()).singleElement().satisfies(p -> {
+                assertThat(p.permitType()).isEqualTo(PermitType.HOT);
+                assertThat(p.status()).isEqualTo(PermitStatus.DRAFT);
+            });
+            assertThat(item.riskAssessment().status()).isEqualTo(RiskStatus.DRAFT);
+            assertThat(item.tbm().status()).isEqualTo(TbmStatus.DRAFT);
+        });
+        assertThat(workService.list(userId, siteId, LocalDate.of(2026, 11, 3), LocalDate.of(2026, 11, 3))).isEmpty();
+
+        assertThat(riskService.getByWork(userId, work.getId()).items()).hasSize(2);
+        assertThat(riskService.getByWork(userId, work.getId()).canSubmit()).isTrue();
+
+        TbmResponse tbm = tbmService.getByWork(userId, work.getId());
+        assertThat(tbm.points()).containsExactly("가스측정 결과 확인", "화재감시자 지정");
+        assertThat(tbm.works()).extracting(TbmResponse.WorkRef::workId).containsExactly(work.getId());
+        assertThat(tbmService.listByDate(userId, siteId, LocalDate.of(2026, 11, 2)))
+                .extracting(TbmResponse::tbmId).containsExactly(tbm.tbmId());
+    }
+
+    @Test
+    @DisplayName("허가서를 연결해 보낸 실행은 실행 상세에 permitId 가 나온다")
+    void runDetail_permitId() {
+        AgentRunStarted first = send(null, "내일 13시 화기작업");
+        Permit permit = hotPermit(workOf(finish(first, done("2026-11-02"))));
+
+        AgentRunStarted second = service.startWorkRegister(userId,
+                new StartWorkRegisterRequest(siteId, first.conversationId(), permit.getId(), "인원 4명으로"));
+
+        assertThat(service.getRun(userId, second.runId()).permitId()).isEqualTo(permit.getId());
+        assertThat(service.getRun(userId, second.runId()).workId()).isNull();   // 아직 처리 중
     }
 }
