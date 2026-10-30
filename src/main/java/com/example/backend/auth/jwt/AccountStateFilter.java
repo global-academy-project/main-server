@@ -1,6 +1,7 @@
 package com.example.backend.auth.jwt;
 
 import com.example.backend.common.exception.ErrorCode;
+import com.example.backend.common.response.ErrorResponseWriter;
 import com.example.backend.user.entity.User;
 import com.example.backend.user.entity.UserStatus;
 import com.example.backend.user.repository.UserRepository;
@@ -46,7 +47,7 @@ public class AccountStateFilter extends OncePerRequestFilter {
                 SecurityContextHolder.clearContext();
                 request.setAttribute(JwtAuthenticationFilter.ERROR_ATTRIBUTE, codeFor(user));
             } else if (user.isMustChangePassword() && !isAllowedWhileMustChange(request)) {
-                writeError(response, ErrorCode.PASSWORD_CHANGE_REQUIRED);
+                ErrorResponseWriter.write(response, ErrorCode.PASSWORD_CHANGE_REQUIRED);
                 return;
             } else {
                 SecurityContextHolder.getContext().setAuthentication(new UsernamePasswordAuthenticationToken(
@@ -68,12 +69,5 @@ public class AccountStateFilter extends OncePerRequestFilter {
     private static boolean isAllowedWhileMustChange(HttpServletRequest request) {
         String path = request.getRequestURI();
         return path.startsWith("/api/v1/auth/") || ALLOWED_WHILE_MUST_CHANGE.contains(path);
-    }
-
-    static void writeError(HttpServletResponse response, ErrorCode code) throws IOException {
-        response.setStatus(code.getStatus().value());
-        response.setContentType("application/json;charset=UTF-8");
-        response.getWriter().write("{\"success\":false,\"error\":{\"code\":\"" + code.name()
-                + "\",\"message\":\"" + code.getDefaultMessage() + "\",\"details\":[]}}");
     }
 }

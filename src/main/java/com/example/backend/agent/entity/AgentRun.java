@@ -115,6 +115,7 @@ public class AgentRun {
     /** 성공 */
     public void complete(String outputJson, String model, NetworkMode networkMode, Integer totalMs,
                          Integer inputTokens, Integer outputTokens, LocalDateTime now) {
+        requireNotFinished();
         applyUsage(model, networkMode, totalMs, inputTokens, outputTokens);
         this.outputJson = outputJson;
         this.status = AgentRunStatus.DONE;
@@ -124,6 +125,7 @@ public class AgentRun {
     /** 되묻기: 사용자 답을 기다림. 끝난 게 아니므로 finished_at 은 비운다 (답변은 다음 실행) */
     public void waitForInput(String outputJson, String model, NetworkMode networkMode, Integer totalMs,
                              Integer inputTokens, Integer outputTokens) {
+        requireNotFinished();
         applyUsage(model, networkMode, totalMs, inputTokens, outputTokens);
         this.outputJson = outputJson;
         this.status = AgentRunStatus.WAITING_INPUT;
@@ -135,6 +137,7 @@ public class AgentRun {
         if (errorMessage == null || errorMessage.isBlank()) {
             throw new IllegalArgumentException("실패한 실행은 오류 내용이 필요합니다.");
         }
+        requireNotFinished();
         this.errorMessage = errorMessage;
         this.totalMs = totalMs;
         this.status = AgentRunStatus.FAILED;
@@ -143,6 +146,13 @@ public class AgentRun {
 
     public boolean isFinished() {
         return status == AgentRunStatus.DONE || status == AgentRunStatus.FAILED;
+    }
+
+    /** 끝난(DONE·FAILED) 실행은 결과를 다시 쓰지 않는다. 늦게 온 응답과 시간 초과 정리가 서로 덮어쓰지 않게 (저장 쪽도 행 잠금 후 확인) */
+    private void requireNotFinished() {
+        if (isFinished()) {
+            throw new IllegalStateException("이미 끝난 실행입니다 (현재 " + status + ").");
+        }
     }
 
     private void applyUsage(String model, NetworkMode networkMode, Integer totalMs, Integer inputTokens, Integer outputTokens) {
