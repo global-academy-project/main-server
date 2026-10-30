@@ -7,4 +7,7 @@ package com.example.backend.agent.client;
 public interface AgentClient {
 
     AgentReply workRegister(WorkRegisterCall call);
+
+    /** 기록 질문 (RECORD_QUERY). 응답 모양은 RecordQueryData */
+    AgentReply recordQuery(RecordQueryCall call);
 }

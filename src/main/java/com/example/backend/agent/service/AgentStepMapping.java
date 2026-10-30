@@ -9,7 +9,7 @@ import java.util.Map;
 /**
  * AI 서버 단계(steps[]) → agent_steps 종류 (B 답신 5장, C 회신 1-5).
  *   TOOL + 도구 이름        → TOOL_CALL
- *   evidence.plan           → PLAN
+ *   evidence.plan · query.plan → PLAN (query.plan: 기록 질문 해석)
  *   evidence.sufficiency    → SUFFICIENCY
  *   evidence.search         → 저장 안 함 (실제 검색은 TOOL 단계로 남음)
  *   judgment / verification → JUDGE / VERIFY
@@ -20,6 +20,7 @@ final class AgentStepMapping {
 
     private static final Map<String, AgentStepType> PHASES = Map.of(
             "evidence.plan", AgentStepType.PLAN,
+            "query.plan", AgentStepType.PLAN,
             "evidence.sufficiency", AgentStepType.SUFFICIENCY,
             "judgment", AgentStepType.JUDGE,
             "verification", AgentStepType.VERIFY);

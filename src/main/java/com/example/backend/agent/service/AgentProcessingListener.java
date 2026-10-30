@@ -3,6 +3,7 @@ package com.example.backend.agent.service;
 import com.example.backend.agent.client.AgentCallException;
 import com.example.backend.agent.client.AgentClient;
 import com.example.backend.agent.client.AgentReply;
+import com.example.backend.agent.client.RecordQueryCall;
 import com.example.backend.agent.client.WorkRegisterCall;
 import com.example.backend.agent.entity.AgentRun;
 import com.example.backend.agent.entity.AgentRunStatus;
@@ -52,9 +53,7 @@ public class AgentProcessingListener {
         }
         long started = System.nanoTime();
         try {
-            RunInput input = jsonMapper.readValue(run.getInputJson(), RunInput.class);
-            AgentReply reply = agentClient.workRegister(new WorkRegisterCall(run.getId(), run.getSiteId(),
-                    input.permitId(), input.message(), input.slots(), run.getMode().name()));
+            AgentReply reply = call(run);
             writer.saveSuccess(run.getId(), reply.data(), elapsed(started));
         } catch (AgentCallException e) {
             log.warn("AI 서버 실행 실패. runId={} code={}", run.getId(), e.getCode());
@@ -63,6 +62,23 @@ public class AgentProcessingListener {
             log.error("에이전트 실행 처리 실패. runId={}", run.getId(), e);
             saveFailure(run.getId(), "AGENT_FAILED", "실행 결과를 처리하지 못했습니다.", null, started);
         }
+    }
+
+    /** 실행 종류별 AI 서버 호출. 처리하지 않는 종류는 실패로 */
+    private AgentReply call(AgentRun run) {
+        return switch (run.getTaskType()) {
+            case WORK_REGISTER -> {
+                RunInput input = jsonMapper.readValue(run.getInputJson(), RunInput.class);
+                yield agentClient.workRegister(new WorkRegisterCall(run.getId(), run.getSiteId(),
+                        input.permitId(), input.message(), input.slots(), run.getMode().name()));
+            }
+            case RECORD_QUERY -> {
+                RecordQueryInput input = jsonMapper.readValue(run.getInputJson(), RecordQueryInput.class);
+                yield agentClient.recordQuery(new RecordQueryCall(run.getId(), run.getSiteId(), input.message(),
+                        input.context(), run.getMode().name()));
+            }
+            default -> throw new AgentCallException("AGENT_UNSUPPORTED", "아직 처리하지 않는 실행 종류입니다: " + run.getTaskType(), null);
+        };
     }
 
     private void saveFailure(Long runId, String code, String message, tools.jackson.databind.JsonNode steps, long started) {

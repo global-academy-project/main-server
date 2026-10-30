@@ -42,6 +42,7 @@ public class AgentResultWriter {
     private final AgentMessageRepository messageRepository;
     private final RuleRepository ruleRepository;
     private final AgentDraftWriter draftWriter;
+    private final EvidenceTargetLookup evidenceLookup;
     private final JsonMapper jsonMapper;
     private final Clock clock;
 
@@ -49,7 +50,8 @@ public class AgentResultWriter {
                              EvidenceCitationRepository citationRepository,
                              AgentConversationRepository conversationRepository,
                              AgentMessageRepository messageRepository, RuleRepository ruleRepository,
-                             AgentDraftWriter draftWriter, JsonMapper jsonMapper, Clock clock) {
+                             AgentDraftWriter draftWriter, EvidenceTargetLookup evidenceLookup,
+                             JsonMapper jsonMapper, Clock clock) {
         this.runRepository = runRepository;
         this.stepRepository = stepRepository;
         this.citationRepository = citationRepository;
@@ -57,6 +59,7 @@ public class AgentResultWriter {
         this.messageRepository = messageRepository;
         this.ruleRepository = ruleRepository;
         this.draftWriter = draftWriter;
+        this.evidenceLookup = evidenceLookup;
         this.jsonMapper = jsonMapper;
         this.clock = clock;
     }
@@ -66,6 +69,10 @@ public class AgentResultWriter {
         AgentRun run = runRepository.findForUpdate(runId).orElse(null);
         if (run == null || run.getStatus() != AgentRunStatus.PROCESSING) {
             log.warn("이미 끝났거나 없는 실행의 결과는 저장하지 않습니다. runId={}", runId);
+            return;
+        }
+        if (run.getTaskType() == AgentTaskType.RECORD_QUERY) {
+            saveRecordQuery(run, data, elapsedMs);
             return;
         }
         WorkRegisterData d = jsonMapper.treeToValue(data, WorkRegisterData.class);
@@ -127,6 +134,71 @@ public class AgentResultWriter {
             }
         }
         failRun(run, code + ": " + message, items, elapsedMs);
+    }
+
+    // ------------------------------------------------------------------ 기록 질문
+
+    /**
+     * 기록 질문 결과: 단계 + 마지막 단계(조회 조건) + 근거 기록(그 현장에 실제로 있는 것만) + 답변 메시지.
+     * 업무 기록은 바꾸지 않는다 (읽기만 하는 실행).
+     */
+    private void saveRecordQuery(AgentRun run, JsonNode data, int elapsedMs) {
+        RecordQueryData d = jsonMapper.treeToValue(data, RecordQueryData.class);
+        if (!WAITING.equals(d.runStatus()) && !DONE.equals(d.runStatus())) {
+            failRun(run, "AI_BAD_RESPONSE: 알 수 없는 실행 상태 " + d.runStatus(), d.steps(), elapsedMs);
+            return;
+        }
+        boolean waiting = WAITING.equals(d.runStatus());
+        String answer = waiting
+                ? (d.ask() != null && d.ask().message() != null && !d.ask().message().isBlank()
+                        ? d.ask().message() : "질문을 조금 더 구체적으로 알려 주세요.")
+                : (d.answer() != null && !d.answer().isBlank() ? d.answer().trim() : null);
+        if (answer == null) {
+            failRun(run, "AI_BAD_RESPONSE: 답변이 비어 있습니다.", d.steps(), elapsedMs);
+            return;
+        }
+
+        int seq = saveSteps(run.getId(), d.steps());
+        Map<String, Object> last = new LinkedHashMap<>();
+        last.put("queries", d.queries());
+        if (waiting) {
+            last.put("ask", d.ask());
+        }
+        stepRepository.save(new AgentStep(run.getId(), seq, waiting ? AgentStepType.ASK_USER : AgentStepType.OUTPUT,
+                null, null, jsonMapper.writeValueAsString(last), AgentStepStatus.DONE, null));
+        saveRecordEvidence(run, d.evidence());
+
+        LocalDateTime now = LocalDateTime.now(clock);
+        String output = jsonMapper.writeValueAsString(data);
+        if (waiting) {
+            run.waitForInput(output, null, null, elapsedMs, null, null);
+        } else {
+            run.complete(output, null, null, elapsedMs, null, null, now);
+        }
+        Map<String, Object> summary = new LinkedHashMap<>();
+        summary.put("runStatus", d.runStatus());
+        summary.put("queries", d.queries());
+        addAssistantMessage(run, cut(answer, 4000), jsonMapper.writeValueAsString(summary), now);
+    }
+
+    /** 근거 기록: 그 현장에 실제로 있는 기록만 RECORD 근거로 저장 (AI 가 만든 id 를 그대로 믿지 않음, 응답 원본은 output_json 에 남음) */
+    private void saveRecordEvidence(AgentRun run, List<RecordQueryData.EvidenceItem> evidence) {
+        if (evidence == null) {
+            return;
+        }
+        java.util.Set<String> seen = new java.util.HashSet<>();
+        for (RecordQueryData.EvidenceItem e : evidence) {
+            if (e == null || !seen.add(e.type() + ":" + e.id())) {
+                continue;
+            }
+            if (!evidenceLookup.exists(e.type(), e.id(), run.getSiteId())) {
+                log.info("이 현장에 없는 근거 기록이라 저장하지 않습니다. runId={} type={} id={}", run.getId(), e.type(), e.id());
+                continue;
+            }
+            String title = cut(e.label() != null && !e.label().isBlank() ? e.label() : e.type() + " " + e.id(), 300);
+            citationRepository.save(EvidenceCitation.of(run.getId(), null, EvidenceSourceType.RECORD, title,
+                    cut(e.type() + ":" + e.id(), 100), null, null).forTarget(e.type(), e.id()));
+        }
     }
 
     // ------------------------------------------------------------------ 내부

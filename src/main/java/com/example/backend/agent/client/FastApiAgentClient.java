@@ -23,6 +23,7 @@ import java.util.Map;
 /**
  * 실제 AI 서버(main-ai-model) 호출. app.agent.client=fastapi 일 때만.
  *   POST {base-url}/api/v1/agent/work-register
+ *   POST {base-url}/api/v1/agent/record-query
  *   성공 {"success": true, "data": WorkRegisterResult}
  *   실패 {"success": false, "error": {"code", "message", "details"}, "steps": [...]}
  * 연결·응답 시간 제한은 application.yaml (app.agent.*). 토큰은 /internal 과 같은 값을 X-Internal-Token 으로 보낸다.
@@ -32,6 +33,7 @@ import java.util.Map;
 public class FastApiAgentClient implements AgentClient {
 
     static final String WORK_REGISTER_PATH = "/api/v1/agent/work-register";
+    static final String RECORD_QUERY_PATH = "/api/v1/agent/record-query";
     private static final Logger log = LoggerFactory.getLogger(FastApiAgentClient.class);
 
     private final RestClient restClient;
@@ -65,6 +67,17 @@ public class FastApiAgentClient implements AgentClient {
         body.put("slots", call.slots());
         body.put("mode", call.mode());
         return post(WORK_REGISTER_PATH, body);
+    }
+
+    @Override
+    public AgentReply recordQuery(RecordQueryCall call) {
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("runId", call.runId());
+        body.put("siteId", call.siteId());
+        body.put("message", call.message());
+        body.put("context", call.context());
+        body.put("mode", call.mode());
+        return post(RECORD_QUERY_PATH, body);
     }
 
     private AgentReply post(String path, Map<String, Object> body) {
