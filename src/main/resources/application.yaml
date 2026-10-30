@@ -70,6 +70,11 @@ app:
     # 로컬 기본값. 통합은 compose 의 APP_OCR_BASE_URL
     base-url: ${APP_OCR_BASE_URL:http://localhost:60100}
     timeout-seconds: 600
+  risk:
+    # 위험성평가 빈도×강도 점수 → 등급 (에이전트 초안 저장 때). 임시 기준, 실무자 검증 때 조정
+    level:
+      high-min-score: 12            # 이 점수 이상이면 HIGH
+      medium-min-score: 6           # 이 점수 이상이면 MEDIUM, 미만은 LOW
   agent:
     # 에이전트 AI 서버: mock(가짜 응답) | fastapi(실제 main-ai-model)
     client: ${APP_AGENT_CLIENT:mock}

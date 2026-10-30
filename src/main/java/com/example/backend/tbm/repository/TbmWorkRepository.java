@@ -13,4 +13,7 @@ public interface TbmWorkRepository extends JpaRepository<TbmWork, TbmWorkId> {
 
     /** 이 작업이 그날 TBM에 이미 들어갔는가 (DB uk_tw_work_date) */
     boolean existsByWorkIdAndTbmDate(Long workId, LocalDate tbmDate);
+
+    /** 작업에 연결된 TBM (최근 것 먼저) */
+    List<TbmWork> findByWorkIdOrderByTbmDateDesc(Long workId);
 }

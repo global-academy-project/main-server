@@ -143,6 +143,11 @@ public class Permit {
     public String getFormData() { return formData; }
     public Long getLastEvaluationId() { return lastEvaluationId; }
     public Long getWriterId() { return writerId; }
+    /** 에이전트가 만든 허가서면 실행 id */
+    public void linkRun(Long agentRunId) {
+        this.agentRunId = agentRunId;
+    }
+
     public Long getAgentRunId() { return agentRunId; }
     public LocalDateTime getClosedAt() { return closedAt; }
     public int getLockVersion() { return lockVersion; }

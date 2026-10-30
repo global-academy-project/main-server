@@ -111,6 +111,36 @@ public class Work {
     public Long getTeamId() { return teamId; }
     public WorkStatus getStatus() { return status; }
     public Long getWriterId() { return writerId; }
+    /** 에이전트가 만든 작업이면 실행 id */
+    public void linkRun(Long agentRunId) {
+        this.agentRunId = agentRunId;
+    }
+
+    /** 승인·진행·완료·취소 전이면 고칠 수 있다 (V9 trg_works_lock 과 같은 기준) */
+    public boolean isEditable() {
+        return status != WorkStatus.APPROVED && status != WorkStatus.IN_PROGRESS
+                && status != WorkStatus.DONE && status != WorkStatus.CANCELED;
+    }
+
+    /** 내용 수정 (에이전트 재완료 등). 고칠 수 없는 상태면 IllegalStateException */
+    public void updateContent(LocalDate workDate, String title, String description, WorkType workType,
+                              LocalDateTime startAt, LocalDateTime endAt, Integer workerCount) {
+        if (!isEditable()) {
+            throw new IllegalStateException("승인·진행·완료·취소된 작업은 고칠 수 없습니다 (현재 " + status + ").");
+        }
+        if (workDate == null || title == null || title.isBlank() || workType == null) {
+            throw new IllegalArgumentException("작업 날짜·이름·종류가 필요합니다.");
+        }
+        this.workDate = workDate;
+        this.title = title.trim();
+        this.description = description;
+        this.workType = workType;
+        this.highRisk = workType != WorkType.GENERAL;
+        this.startAt = startAt;
+        this.endAt = endAt;
+        this.workerCount = workerCount;
+    }
+
     public Long getAgentRunId() { return agentRunId; }
     public int getLockVersion() { return lockVersion; }
     public LocalDateTime getCreatedAt() { return createdAt; }
