@@ -12,4 +12,7 @@ public interface TbmRecordRepository extends JpaRepository<TbmRecord, Long> {
 
     /** TBM 마감 알림: 그날 기록이 있는가 */
     boolean existsBySiteIdAndTbmDate(Long siteId, LocalDate tbmDate);
+
+    /** 대시보드: 기간 TBM */
+    List<TbmRecord> findBySiteIdAndTbmDateBetweenOrderByTbmDateAscIdAsc(Long siteId, LocalDate from, LocalDate to);
 }

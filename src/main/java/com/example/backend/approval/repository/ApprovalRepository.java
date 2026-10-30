@@ -11,6 +11,7 @@ import org.springframework.data.jpa.repository.Lock;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
+import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Optional;
 
@@ -34,4 +35,11 @@ public interface ApprovalRepository extends JpaRepository<Approval, Long> {
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("select a from Approval a where a.id = :id")
     Optional<Approval> findForUpdate(@Param("id") Long id);
+
+    /** 결재 마감 지남: 현장별 (대시보드) */
+    List<Approval> findBySiteIdAndStatusAndDueAtBeforeOrderByDueAtAscIdAsc(Long siteId, ApprovalStatus status,
+                                                                         LocalDateTime now);
+
+    /** 결재 마감 지남: 전체 (마감 알림) */
+    List<Approval> findByStatusAndDueAtBeforeOrderByDueAtAscIdAsc(ApprovalStatus status, LocalDateTime now);
 }

@@ -19,4 +19,7 @@ public interface InspectionRepository extends JpaRepository<Inspection, Long> {
     Optional<Inspection> findTopByEquipmentIdOrderByInspectDateDescIdDesc(Long equipmentId);
 
     Optional<Inspection> findByIdAndSiteId(Long id, Long siteId);
+
+    /** 대시보드: 기간 점검표 */
+    List<Inspection> findBySiteIdAndInspectDateBetweenOrderByInspectDateAscIdAsc(Long siteId, LocalDate from, LocalDate to);
 }

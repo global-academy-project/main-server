@@ -17,4 +17,7 @@ public interface SignatureRepository extends JpaRepository<Signature, Long> {
 
     boolean existsByTargetTypeAndTargetIdAndPurposeAndWorkerId(SignatureTarget targetType, Long targetId,
                                                               SignaturePurpose purpose, Long workerId);
+
+    /** 대시보드: TBM 참석자 서명 수 */
+    long countByTargetTypeAndTargetIdAndPurpose(SignatureTarget targetType, Long targetId, SignaturePurpose purpose);
 }

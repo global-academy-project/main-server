@@ -79,6 +79,9 @@ app:
     list:
       max-days: 31                  # 작업 목록 한 번에 볼 수 있는 기간(일)
       max-rows: 200                 # 작업 목록 최대 행 수
+  dashboard:
+    max-days: 31                    # 대시보드 기간 집계 최대 일수
+    deadline-check-interval-ms: 300000   # 마감 알림(TBM·안전일지·개선조치·승인 지연) 확인 주기 (5분)
   agent:
     # 에이전트 AI 서버: mock(가짜 응답) | fastapi(실제 main-ai-model)
     client: ${APP_AGENT_CLIENT:mock}

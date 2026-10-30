@@ -238,10 +238,49 @@ public class ApprovalService {
         return detail(user, approval);
     }
 
+    /** 결재 마감이 지난 대기 결재 (대시보드 승인 지연, 마감 순). 현장 권한 확인은 부르는 쪽에서 */
+    @Transactional(readOnly = true)
+    public List<ApprovalSummary> overdue(Long siteId, LocalDateTime now) {
+        return summaries(approvalRepository.findBySiteIdAndStatusAndDueAtBeforeOrderByDueAtAscIdAsc(siteId,
+                ApprovalStatus.PENDING, now));
+    }
+
+    // ------------------------------------------------------------------ 마감 재알림 (DeadlineNotifier 가 부름)
+
+    /**
+     * 결재 마감이 지난 대기 결재마다, 지금 단계를 결재할 수 있는 사람에게 한 번 재알림 (단계마다 한 번).
+     * @return 새로 보낸 알림 수
+     */
+    @Transactional
+    public int remindOverdue(LocalDateTime now) {
+        int sent = 0;
+        for (Approval a : approvalRepository.findByStatusAndDueAtBeforeOrderByDueAtAscIdAsc(ApprovalStatus.PENDING, now)) {
+            String key = "DEADLINE:APPROVAL:" + a.getId() + ":" + a.getCurrentStep();
+            ApprovalStep step = currentStep(a);
+            if (step == null || notificationRepository.findByDedupeKey(key).isPresent()) {
+                continue;
+            }
+            Site site = site(a);
+            Set<Long> to = stepCandidates(a, step, site);
+            if (to.isEmpty()) {
+                continue;
+            }
+            String title = handler(a.getTargetType()).title(a.getTargetId());
+            Notification n = notificationRepository.save(Notification.of(a.getSiteId(), NotificationType.DEADLINE,
+                            NotificationSeverity.WARN, "승인 지연", cut(title + " · " + step.getLabel()
+                                    + " 결재 마감이 지났습니다.", 500), now)
+                    .about(NotificationTarget.APPROVAL, a.getId())
+                    .dedupeKey(key));
+            to.forEach(userId -> recipientRepository.save(new NotificationRecipient(n, userId)));
+            sent++;
+        }
+        return sent;
+    }
+
     // ------------------------------------------------------------------ 권한
 
     /** 현장 역할 서열: 작성자 0 < 승인자 1 < 현장 관리자 2 < 회사 관리자 3. 권한 없음 -1 */
-    static int rankOf(String siteRole) {
+    public static int rankOf(String siteRole) {
         if (siteRole == null) return -1;
         return switch (siteRole) {
             case "WRITER" -> 0;
@@ -252,7 +291,7 @@ public class ApprovalService {
         };
     }
 
-    static int rankOf(ApproverRole required) {
+    public static int rankOf(ApproverRole required) {
         return rankOf(required.name());
     }
 
@@ -337,6 +376,23 @@ public class ApprovalService {
 
     /** 그 단계를 결재할 수 있는 사람에게 승인 요청 알림. 검증 모드면 요청자는 빼고 */
     private void notifyStep(Approval approval, ApprovalStep step, Site site, LocalDateTime now) {
+        Set<Long> to = stepCandidates(approval, step, site);
+        if (to.isEmpty()) {
+            log.warn("결재할 수 있는 현장 권한자가 없어 승인 요청 알림을 보내지 않았습니다. approvalId={} step={}",
+                    approval.getId(), step.getStepNo());
+            return;
+        }
+        String title = handler(approval.getTargetType()).title(approval.getTargetId());
+        Notification n = notificationRepository.save(Notification.of(approval.getSiteId(), NotificationType.APPROVAL_REQUEST,
+                        NotificationSeverity.WARN, "승인 요청", cut(title + " · " + step.getLabel() + " 차례입니다.", 500), now)
+                .about(NotificationTarget.APPROVAL, approval.getId())
+                .by(ActorType.USER, approval.getRequestedBy())
+                .dedupeKey("APPROVAL_REQUEST:" + approval.getId() + ":" + step.getStepNo()));
+        to.forEach(userId -> recipientRepository.save(new NotificationRecipient(n, userId)));
+    }
+
+    /** 그 단계를 결재할 수 있는 현장 인원: 지정자, 아니면 역할이 충분한 ACTIVE 인원. 검증 모드면 요청자 제외 */
+    private Set<Long> stepCandidates(Approval approval, ApprovalStep step, Site site) {
         Set<Long> to = new LinkedHashSet<>();
         if (step.getAssigneeId() != null) {
             to.add(step.getAssigneeId());
@@ -351,18 +407,7 @@ public class ApprovalService {
         if (site.getMode() == SiteMode.VERIFY) {
             to.remove(approval.getRequestedBy());
         }
-        if (to.isEmpty()) {
-            log.warn("결재할 수 있는 현장 권한자가 없어 승인 요청 알림을 보내지 않았습니다. approvalId={} step={}",
-                    approval.getId(), step.getStepNo());
-            return;
-        }
-        String title = handler(approval.getTargetType()).title(approval.getTargetId());
-        Notification n = notificationRepository.save(Notification.of(approval.getSiteId(), NotificationType.APPROVAL_REQUEST,
-                        NotificationSeverity.WARN, "승인 요청", cut(title + " · " + step.getLabel() + " 차례입니다.", 500), now)
-                .about(NotificationTarget.APPROVAL, approval.getId())
-                .by(ActorType.USER, approval.getRequestedBy())
-                .dedupeKey("APPROVAL_REQUEST:" + approval.getId() + ":" + step.getStepNo()));
-        to.forEach(userId -> recipientRepository.save(new NotificationRecipient(n, userId)));
+        return to;
     }
 
     /** 결과를 요청자에게 */

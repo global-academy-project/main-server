@@ -19,4 +19,7 @@ public interface CorrectiveActionRepository extends JpaRepository<CorrectiveActi
 
     /** 출처 기록의 조치들 (예: 이 아차사고의 개선 조치) */
     List<CorrectiveAction> findBySourceTypeAndSourceIdOrderByIdAsc(ActionSource sourceType, Long sourceId);
+
+    /** 대시보드: 끝나지 않은 조치 (기한 순, 기한 없는 것은 뒤) */
+    List<CorrectiveAction> findBySiteIdAndStatusInOrderByDueDateAscIdAsc(Long siteId, Collection<ActionStatus> statuses);
 }
