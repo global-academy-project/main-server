@@ -75,6 +75,10 @@ app:
     level:
       high-min-score: 12            # 이 점수 이상이면 HIGH
       medium-min-score: 6           # 이 점수 이상이면 MEDIUM, 미만은 LOW
+  work:
+    list:
+      max-days: 31                  # 작업 목록 한 번에 볼 수 있는 기간(일)
+      max-rows: 200                 # 작업 목록 최대 행 수
   agent:
     # 에이전트 AI 서버: mock(가짜 응답) | fastapi(실제 main-ai-model)
     client: ${APP_AGENT_CLIENT:mock}

@@ -4,6 +4,8 @@ import com.example.backend.permit.entity.Permit;
 import com.example.backend.permit.entity.PermitType;
 import org.springframework.data.jpa.repository.JpaRepository;
 
+import java.util.Collection;
+import java.util.List;
 import java.util.Optional;
 
 public interface PermitRepository extends JpaRepository<Permit, Long> {
@@ -15,4 +17,7 @@ public interface PermitRepository extends JpaRepository<Permit, Long> {
 
     /** 작업·종류의 최신 판 */
     Optional<Permit> findTopByWorkIdAndPermitTypeOrderByRevisionDesc(Long workId, PermitType permitType);
+
+    /** 작업 목록: 여러 작업의 허가서 (모든 판) */
+    List<Permit> findByWorkIdIn(Collection<Long> workIds);
 }
