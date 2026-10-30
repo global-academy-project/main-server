@@ -26,8 +26,7 @@ import com.example.backend.permit.entity.PermitStatus;
 import com.example.backend.permit.entity.PermitType;
 import com.example.backend.permit.repository.PermitMeasurementRepository;
 import com.example.backend.permit.repository.PermitRepository;
-import com.example.backend.rule.entity.Rule;
-import com.example.backend.rule.repository.RuleRepository;
+import com.example.backend.rule.service.MeasurementRequirements;
 import com.example.backend.signature.entity.SignaturePurpose;
 import com.example.backend.signature.entity.SignatureTarget;
 import com.example.backend.signature.repository.SignatureRepository;
@@ -71,13 +70,12 @@ public class DashboardService {
             PermitStatus.BLOCKED);
     private static final Set<TbmStatus> TBM_HELD = EnumSet.of(TbmStatus.DONE, TbmStatus.APPROVED);
     private static final List<ActionStatus> ACTION_OPEN = List.of(ActionStatus.OPEN, ActionStatus.IN_PROGRESS);
-    private static final String MEASUREMENT_PREFIX = "measurement.";
 
     private final SiteRepository siteRepository;
     private final WorkRepository workRepository;
     private final PermitRepository permitRepository;
     private final PermitMeasurementRepository measurementRepository;
-    private final RuleRepository ruleRepository;
+    private final MeasurementRequirements measurementRequirements;
     private final TbmRecordRepository tbmRepository;
     private final TbmWorkRepository tbmWorkRepository;
     private final TbmAttendeeRepository attendeeRepository;
@@ -94,7 +92,7 @@ public class DashboardService {
 
     public DashboardService(SiteRepository siteRepository, WorkRepository workRepository,
                             PermitRepository permitRepository, PermitMeasurementRepository measurementRepository,
-                            RuleRepository ruleRepository, TbmRecordRepository tbmRepository,
+                            MeasurementRequirements measurementRequirements, TbmRecordRepository tbmRepository,
                             TbmWorkRepository tbmWorkRepository, TbmAttendeeRepository attendeeRepository,
                             DailySafetyLogRepository dailyLogRepository, InspectionRepository inspectionRepository,
                             CorrectiveActionRepository actionRepository, SignatureRepository signatureRepository,
@@ -105,7 +103,7 @@ public class DashboardService {
         this.workRepository = workRepository;
         this.permitRepository = permitRepository;
         this.measurementRepository = measurementRepository;
-        this.ruleRepository = ruleRepository;
+        this.measurementRequirements = measurementRequirements;
         this.tbmRepository = tbmRepository;
         this.tbmWorkRepository = tbmWorkRepository;
         this.attendeeRepository = attendeeRepository;
@@ -227,7 +225,7 @@ public class DashboardService {
     /** 화기·밀폐 허가가 작성 중(DRAFT·CHECKING·BLOCKED)이고 작업 전 측정값이 규칙 측정 항목보다 적음. 작업 시작이 지나면 지연 */
     private void measurementMissing(Map<Long, Work> workById, LocalDateTime now,
                                     Map<LocalDate, Map<IncompleteType, List<Entry>>> entries) {
-        Map<String, Set<MeasurementItem>> required = requiredMeasurements();
+        Map<String, Set<MeasurementItem>> required = measurementRequirements.byPermitType();
         if (required.isEmpty()) {
             return;
         }
@@ -254,25 +252,6 @@ public class DashboardService {
                     p.getPermitNo() + " " + permitLabel(p.getPermitType()), w.getId(),
                     missing.stream().map(Enum::name).collect(Collectors.joining(", ")), w.getStartAt(), late));
         }
-    }
-
-    /** 허가 종류별 작업 전 측정 항목 = 켜진 MEASUREMENT 규칙의 measurement.{항목} (규칙이 바뀌면 같이 바뀜) */
-    Map<String, Set<MeasurementItem>> requiredMeasurements() {
-        List<String> types = Arrays.stream(PermitType.values()).map(Enum::name).toList();
-        Map<String, Set<MeasurementItem>> out = new HashMap<>();
-        for (Rule r : ruleRepository.findByEnabledTrueAndWorkTypeInOrderByRuleCodeAsc(types)) {
-            if (!"MEASUREMENT".equals(r.getCategory()) || r.getTarget() == null
-                    || !r.getTarget().startsWith(MEASUREMENT_PREFIX)) {
-                continue;
-            }
-            try {
-                MeasurementItem item = MeasurementItem.valueOf(r.getTarget().substring(MEASUREMENT_PREFIX.length()));
-                out.computeIfAbsent(r.getWorkType(), k -> EnumSet.noneOf(MeasurementItem.class)).add(item);
-            } catch (IllegalArgumentException e) {
-                // 측정 항목 목록에 없는 규칙 대상은 집계하지 않는다
-            }
-        }
-        return out;
     }
 
     /** 작업일에 그 작업과 연결된 TBM 이 없음. 현장 tbm_deadline 이후 지연 */

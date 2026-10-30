@@ -245,6 +245,12 @@ public class ApprovalService {
                 ApprovalStatus.PENDING, now));
     }
 
+    /** 결재 목록을 요약으로 (기록 조회 도구). 현장 권한 확인은 부르는 쪽에서 */
+    @Transactional(readOnly = true)
+    public List<ApprovalSummary> describe(List<Approval> approvals) {
+        return summaries(approvals);
+    }
+
     // ------------------------------------------------------------------ 마감 재알림 (DeadlineNotifier 가 부름)
 
     /**
