@@ -77,7 +77,8 @@ class RuleDbIntegrationTest {
         long before = evaluationRepository.count();
 
         RuleCheckResult r = ruleCheckService.check(new RuleCheckCommand(siteId, WorkType.CONFINED, null, null, null,
-                Map.of("measurement", Map.of("O2", 17.5, "CO2", 0.8, "CO", 5, "H2S", 0, "LEL", 0))));
+                Map.of("measurement", Map.of("O2", 17.5, "CO2", 0.8, "CO", 5, "H2S", 0, "LEL", 0),
+                        "form", Map.of("watcher_name", "김감시", "ventilation_done", true, "rescue_equipment_ready", true))));
 
         assertThat(r.result()).isEqualTo(EvaluationResult.BLOCK);
         assertThat(r.evaluationId()).isNull();
