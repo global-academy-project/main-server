@@ -251,36 +251,43 @@ public class ApprovalService {
         return summaries(approvals);
     }
 
-    // ------------------------------------------------------------------ 마감 재알림 (DeadlineNotifier 가 부름)
+    // ------------------------------------------------------------------ 마감 재알림 (DeadlineService 가 부름)
+
+    /** 결재 마감이 지난 대기 결재 id (마감 재알림 대상, 마감 순) */
+    @Transactional(readOnly = true)
+    public List<Long> overdueApprovalIds(LocalDateTime now) {
+        return approvalRepository.findByStatusAndDueAtBeforeOrderByDueAtAscIdAsc(ApprovalStatus.PENDING, now).stream()
+                .map(Approval::getId).toList();
+    }
 
     /**
-     * 결재 마감이 지난 대기 결재마다, 지금 단계를 결재할 수 있는 사람에게 한 번 재알림 (단계마다 한 번).
-     * @return 새로 보낸 알림 수
+     * 결재 하나 재알림: 지금 단계를 결재할 수 있는 사람에게 한 번 (단계마다 한 번, 키 DEADLINE:APPROVAL:{결재}:{단계}).
+     * 부르는 쪽(DeadlineService)이 결재마다 따로 불러 하나가 실패해도 다른 결재 재알림은 나간다.
+     * @return 새로 보냈으면 true
      */
     @Transactional
-    public int remindOverdue(LocalDateTime now) {
-        int sent = 0;
-        for (Approval a : approvalRepository.findByStatusAndDueAtBeforeOrderByDueAtAscIdAsc(ApprovalStatus.PENDING, now)) {
-            String key = "DEADLINE:APPROVAL:" + a.getId() + ":" + a.getCurrentStep();
-            ApprovalStep step = currentStep(a);
-            if (step == null || notificationRepository.findByDedupeKey(key).isPresent()) {
-                continue;
-            }
-            Site site = site(a);
-            Set<Long> to = stepCandidates(a, step, site);
-            if (to.isEmpty()) {
-                continue;
-            }
-            String title = handler(a.getTargetType()).title(a.getTargetId());
-            Notification n = notificationRepository.save(Notification.of(a.getSiteId(), NotificationType.DEADLINE,
-                            NotificationSeverity.WARN, "승인 지연", cut(title + " · " + step.getLabel()
-                                    + " 결재 마감이 지났습니다.", 500), now)
-                    .about(NotificationTarget.APPROVAL, a.getId())
-                    .dedupeKey(key));
-            to.forEach(userId -> recipientRepository.save(new NotificationRecipient(n, userId)));
-            sent++;
+    public boolean remindOverdue(Long approvalId, LocalDateTime now) {
+        Approval a = approvalRepository.findById(approvalId).orElse(null);
+        if (a == null || !a.isPending() || a.getDueAt() == null || !a.getDueAt().isBefore(now)) {
+            return false;
         }
-        return sent;
+        String key = "DEADLINE:APPROVAL:" + a.getId() + ":" + a.getCurrentStep();
+        ApprovalStep step = currentStep(a);
+        if (step == null || notificationRepository.findByDedupeKey(key).isPresent()) {
+            return false;
+        }
+        Set<Long> to = stepCandidates(a, step, site(a));
+        if (to.isEmpty()) {
+            return false;
+        }
+        String title = handler(a.getTargetType()).title(a.getTargetId());
+        Notification n = notificationRepository.save(Notification.of(a.getSiteId(), NotificationType.DEADLINE,
+                        NotificationSeverity.WARN, "승인 지연", cut(title + " · " + step.getLabel()
+                                + " 결재 마감이 지났습니다.", 500), now)
+                .about(NotificationTarget.APPROVAL, a.getId())
+                .dedupeKey(key));
+        to.forEach(userId -> recipientRepository.save(new NotificationRecipient(n, userId)));
+        return true;
     }
 
     // ------------------------------------------------------------------ 권한

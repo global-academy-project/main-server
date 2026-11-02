@@ -21,8 +21,8 @@ public interface NotificationRecipientRepository extends JpaRepository<Notificat
     /** SSE 재접속: 이 id 이후 못 받은 것 */
     List<NotificationRecipient> findByUserIdAndIdGreaterThanAndDeliveredAtIsNullOrderByIdAsc(Long userId, Long afterId);
 
-    /** 모두 읽음 */
-    @Modifying
+    /** 모두 읽음 (벌크 수정이라 영속성 컨텍스트를 비워 다음 조회가 DB 값을 읽게 한다) */
+    @Modifying(flushAutomatically = true, clearAutomatically = true)
     @Query("""
             update NotificationRecipient r set r.readAt = :now
              where r.userId = :userId and r.readAt is null and r.createdAt <= :now

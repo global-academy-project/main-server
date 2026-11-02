@@ -16,6 +16,8 @@ import com.example.backend.site.entity.SiteMember;
 import com.example.backend.site.repository.SiteMemberRepository;
 import com.example.backend.site.repository.SiteRepository;
 import com.example.backend.work.entity.Work;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -37,6 +39,8 @@ import java.util.stream.Collectors;
  */
 @Service
 public class DeadlineService {
+
+    private static final Logger log = LoggerFactory.getLogger(DeadlineService.class);
 
     private static final DateTimeFormatter HM = DateTimeFormatter.ofPattern("HH:mm");
 
@@ -96,17 +100,29 @@ public class DeadlineService {
                 continue;
             }
             Long assignee = dashboardService.assigneeOf(a.targetId());
-            Set<Long> to = assignee != null ? Set.of(assignee) : approvers;
+            Set<Long> to = assignee != null ? Set.of(assignee) : approvers;   // 담당자는 필수라 대비용
             sent += send(siteId, "ACTION_DUE:" + a.targetId() + ":" + today, NotificationType.ACTION_DUE, "개선조치 기한 지남",
                     a.title() + " · " + a.detail(), NotificationTarget.CORRECTIVE_ACTION, a.targetId(), to, now, null);
         }
         return sent;
     }
 
-    /** 결재 마감 지난 결재 재알림 (모든 현장) */
-    @Transactional
+    /**
+     * 결재 마감 지난 결재 재알림 (모든 현장). 결재마다 따로 처리해서(각각 자기 트랜잭션) 하나가 실패해도 나머지는 보낸다.
+     * 실패한 결재는 다음 주기에 다시 시도한다.
+     */
     public int remindApprovals(LocalDateTime now) {
-        return approvalService.remindOverdue(now);
+        int sent = 0;
+        for (Long id : approvalService.overdueApprovalIds(now)) {
+            try {
+                if (approvalService.remindOverdue(id, now)) {
+                    sent++;
+                }
+            } catch (RuntimeException e) {
+                log.warn("승인 지연 재알림 실패 approvalId={}: {}", id, e.toString());
+            }
+        }
+        return sent;
     }
 
     private Set<Long> approvers(Long siteId) {
