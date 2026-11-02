@@ -10,6 +10,7 @@ import org.springframework.web.HttpRequestMethodNotSupportedException;
 import org.springframework.web.bind.MissingServletRequestParameterException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
+import org.springframework.web.method.annotation.HandlerMethodValidationException;
 import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
 import org.springframework.web.multipart.MaxUploadSizeExceededException;
 import com.example.backend.common.response.ErrorDetail;
@@ -38,6 +39,16 @@ public class GlobalExceptionHandler {
     public ResponseEntity<ApiResponse<Void>> handleBind(BindException e) {
         List<ErrorDetail> details = e.getBindingResult().getFieldErrors().stream()
                 .map(f -> new ErrorDetail(f.getField(), f.getDefaultMessage()))
+                .toList();
+        return build(ErrorCode.INVALID_REQUEST, ErrorCode.INVALID_REQUEST.getDefaultMessage(), details);
+    }
+
+    /** 요청 본문이 목록일 때 항목 검증 실패 (List<@Valid ...>, Spring 6.1 메서드 검증) */
+    @ExceptionHandler(HandlerMethodValidationException.class)
+    public ResponseEntity<ApiResponse<Void>> handleMethodValidation(HandlerMethodValidationException e) {
+        List<ErrorDetail> details = e.getAllErrors().stream()
+                .map(err -> new ErrorDetail(err instanceof org.springframework.validation.FieldError f ? f.getField() : null,
+                        err.getDefaultMessage()))
                 .toList();
         return build(ErrorCode.INVALID_REQUEST, ErrorCode.INVALID_REQUEST.getDefaultMessage(), details);
     }
