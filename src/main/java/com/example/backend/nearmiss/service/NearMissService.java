@@ -28,6 +28,7 @@ import com.example.backend.tag.repository.TagCodeRepository;
 import com.example.backend.user.entity.User;
 import com.example.backend.user.repository.UserRepository;
 import com.example.backend.work.repository.WorkRepository;
+import com.example.backend.work.service.WorkWarningService;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.stereotype.Service;
@@ -75,6 +76,7 @@ public class NearMissService {
     private final SiteGuard siteGuard;
     private final SiteAccessService siteAccessService;
     private final LockVersions lockVersions;
+    private final WorkWarningService warningService;
     private final JsonMapper jsonMapper;
     private final Clock clock;
     private final int maxPerAxis;
@@ -87,8 +89,8 @@ public class NearMissService {
                            TagCodeRepository codeRepository, WorkZoneRepository zoneRepository,
                            WorkRepository workRepository, UserRepository userRepository,
                            RecordHistoryRepository historyRepository, SiteGuard siteGuard,
-                           SiteAccessService siteAccessService, LockVersions lockVersions, JsonMapper jsonMapper,
-                           Clock clock,
+                           SiteAccessService siteAccessService, LockVersions lockVersions,
+                           WorkWarningService warningService, JsonMapper jsonMapper, Clock clock,
                            @Value("${app.near-miss.tags.max-per-axis}") int maxPerAxis,
                            @Value("${app.near-miss.list.max-rows}") int listMaxRows,
                            @Value("${app.near-miss.search.default-limit}") int searchDefaultLimit,
@@ -104,6 +106,7 @@ public class NearMissService {
         this.siteGuard = siteGuard;
         this.siteAccessService = siteAccessService;
         this.lockVersions = lockVersions;
+        this.warningService = warningService;
         this.jsonMapper = jsonMapper;
         this.clock = clock;
         this.maxPerAxis = maxPerAxis;
@@ -137,7 +140,8 @@ public class NearMissService {
             throw new BusinessException(ErrorCode.INVALID_REQUEST, e.getMessage());
         }
         nearMissRepository.saveAndFlush(n);
-        history(n, HistoryAction.CREATE, user.getId(), Map.of("title", n.getTitle()));
+        int warned = warningService.warnFromNearMiss(n);   // 같은 구역 작업에 경고 (시나리오 C)
+        history(n, HistoryAction.CREATE, user.getId(), Map.of("title", n.getTitle(), "warnedWorks", warned));
         return responses(List.of(n)).get(0);
     }
 
