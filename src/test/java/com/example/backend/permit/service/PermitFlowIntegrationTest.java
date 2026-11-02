@@ -81,18 +81,25 @@ class PermitFlowIntegrationTest {
     }
 
     @Test
-    @DisplayName("판정 규칙이 없는 허가(고소)는 판정이 PASS여도 승인 요청할 수 없다")
-    void noRules_cannotSubmit() {   // 고소 규칙을 추가하면 규칙이 없는 다른 종류로 바꾼다
+    @DisplayName("고소 허가 (11/02 규칙 추가): 추락 방지·안전모·안전대가 비면 BLOCK, 다 확인하면 PASS 후 승인 요청 가능")
+    void heightPermit() {   // 규칙 0건 허가 차단은 이제 해당 종류가 없다 (코드는 그대로 둠)
         Long id = permitService.create(adminId, new CreatePermitRequest(workId, PermitType.HEIGHT, FROM, TO,
-                null, "이반장", Map.of())).permitId();
+                null, "이반장", Map.of("fall_protection", "LADDER"))).permitId();
 
-        PermitCheckResponse r = permitService.check(adminId, id);
+        PermitCheckResponse blocked = permitService.check(adminId, id);
 
-        assertThat(r.evaluation().result()).isEqualTo(EvaluationResult.PASS);
-        assertThat(r.evaluation().rulesApplied()).isZero();
-        assertThat(r.canSubmit()).isFalse();
-        assertThat(permitService.get(adminId, id).canSubmit()).isFalse();
+        assertThat(blocked.evaluation().result()).isEqualTo(EvaluationResult.BLOCK);
+        assertThat(blocked.evaluation().rulesApplied()).isEqualTo(3);
+        assertThat(blocked.canSubmit()).isFalse();
         expectCode(() -> permitService.submit(adminId, id), ErrorCode.INVALID_STATE);
+
+        PermitResponse current = permitService.get(adminId, id);
+        permitService.update(adminId, id, new UpdatePermitRequest(FROM, TO, null, "이반장",
+                Map.of("fall_protection", "SAFETY_HARNESS", "helmet_worn", true, "harness_worn", true), current.lockVersion()));
+        PermitCheckResponse passed = permitService.check(adminId, id);
+
+        assertThat(passed.evaluation().result()).isEqualTo(EvaluationResult.PASS);
+        assertThat(passed.canSubmit()).isTrue();
     }
 
     @Test

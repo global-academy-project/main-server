@@ -62,7 +62,43 @@ VALUES
  ('HOT_FLAMMABLE_VAPOR_REMOVED', 1, 'HOT', 'REQUIRED_FIELD', 'form.flammable_vapor_removed', 'IN',
   NULL, TRUE, NULL, FALSE, JSON_ARRAY(TRUE), NULL,
   'BLOCK', '인화성 액체의 증기·인화성 가스 제거(환기 등)가 확인되지 않았습니다.', '환기 등으로 인화성 증기·가스 제거 후 확인',
-  '산업안전보건기준에 관한 규칙 제241조제2항제5호', 'https://www.law.go.kr/법령/산업안전보건기준에관한규칙')
+  '산업안전보건기준에 관한 규칙 제241조제2항제5호', 'https://www.law.go.kr/법령/산업안전보건기준에관한규칙'),
+
+ -- ---------------------------------------------------------------- 밀폐공간 (작업 조치, 11/02 추가)
+ -- 근거: 산업안전보건기준에 관한 규칙 제620조(환기 등)·제623조(감시인의 배치 등)·제625조(대피용 기구의 비치)
+ --       조문 제목은 국가법령정보센터 현행본(시행 2026.3.2, 고용노동부령 제450호)에서 확인. 본문 문구는 공개 해설 자료 인용과 대조함
+ -- 감시인: 허가서 감시자(watcher_name) 칸을 같이 쓴다 (화기 화재감시자와 같은 칸)
+ ('CONFINED_WATCHER', 1, 'CONFINED', 'STAFFING', 'form.watcher_name', 'REQUIRED',
+  NULL, TRUE, NULL, FALSE, NULL, NULL,
+  'BLOCK', '밀폐공간 외부에 배치할 감시인이 지정되지 않았습니다.', '작업상황을 감시할 감시인을 지정해 밀폐공간 외부에 배치',
+  '산업안전보건기준에 관한 규칙 제623조', 'https://www.law.go.kr/법령/산업안전보건기준에관한규칙'),
+ ('CONFINED_VENTILATION', 1, 'CONFINED', 'REQUIRED_FIELD', 'form.ventilation_done', 'IN',
+  NULL, TRUE, NULL, FALSE, JSON_ARRAY(TRUE), NULL,
+  'BLOCK', '작업 시작 전 환기(적정공기 유지)가 확인되지 않았습니다.', '작업 전과 작업 중 적정공기 상태가 유지되도록 환기',
+  '산업안전보건기준에 관한 규칙 제620조', 'https://www.law.go.kr/법령/산업안전보건기준에관한규칙'),
+ ('CONFINED_RESCUE_EQUIPMENT', 1, 'CONFINED', 'REQUIRED_FIELD', 'form.rescue_equipment_ready', 'IN',
+  NULL, TRUE, NULL, FALSE, JSON_ARRAY(TRUE), NULL,
+  'BLOCK', '대피·구출용 기구(공기호흡기 또는 송기마스크, 사다리, 섬유로프 등) 비치가 확인되지 않았습니다.', '공기호흡기 또는 송기마스크, 사다리, 섬유로프 비치',
+  '산업안전보건기준에 관한 규칙 제625조', 'https://www.law.go.kr/법령/산업안전보건기준에관한규칙'),
+
+ -- ---------------------------------------------------------------- 고소 (11/02 추가)
+ -- 근거: 산업안전보건기준에 관한 규칙 제42조(추락의 방지) 제1·2항 (국가법령정보센터 현행본 시행 2026.3.2 확인),
+ --       제32조(보호구의 지급 등) 제1항제1호 안전모·제2호 안전대 (높이 또는 깊이 2미터 이상 추락 위험 장소)
+ -- 추락 방지 조치: 작업발판 → 곤란하면 추락방호망 → 곤란하면 안전대 착용 등 (제42조 순서). 화면은 고른 방법 하나를 보낸다
+ -- 주의: 제42조제4항(이동식 사다리)은 조건(높이·바닥·점검 등)이 많아 지금은 허용값에 넣지 않는다 (3주차 규칙 예외 보완)
+ --       안전대(제32조제1항제2호)는 2m 이상일 때다. 고소 허가는 2m 이상 작업에 쓰는 것으로 보고 모두 적용한다
+ ('HEIGHT_FALL_PROTECTION', 1, 'HEIGHT', 'REQUIRED_FIELD', 'form.fall_protection', 'IN',
+  NULL, TRUE, NULL, FALSE, JSON_ARRAY('WORK_PLATFORM', 'SAFETY_NET', 'SAFETY_HARNESS'), NULL,
+  'BLOCK', '추락 방지 조치(작업발판·추락방호망·안전대 착용 중 하나)가 정해지지 않았습니다.', '작업발판 설치, 곤란하면 추락방호망, 곤란하면 안전대 착용',
+  '산업안전보건기준에 관한 규칙 제42조제1항·제2항', 'https://www.law.go.kr/법령/산업안전보건기준에관한규칙'),
+ ('HEIGHT_HELMET', 1, 'HEIGHT', 'REQUIRED_FIELD', 'form.helmet_worn', 'IN',
+  NULL, TRUE, NULL, FALSE, JSON_ARRAY(TRUE), NULL,
+  'BLOCK', '안전모 착용이 확인되지 않았습니다.', '안전모 지급·착용',
+  '산업안전보건기준에 관한 규칙 제32조제1항제1호', 'https://www.law.go.kr/법령/산업안전보건기준에관한규칙'),
+ ('HEIGHT_HARNESS', 1, 'HEIGHT', 'REQUIRED_FIELD', 'form.harness_worn', 'IN',
+  NULL, TRUE, NULL, FALSE, JSON_ARRAY(TRUE), NULL,
+  'BLOCK', '안전대 착용이 확인되지 않았습니다 (높이 2m 이상 추락 위험 장소).', '안전대 지급·착용, 안전대 걸이 설비 확인',
+  '산업안전보건기준에 관한 규칙 제32조제1항제2호', 'https://www.law.go.kr/법령/산업안전보건기준에관한규칙')
 AS new
 ON DUPLICATE KEY UPDATE
   work_type = new.work_type, category = new.category, target = new.target,
@@ -72,9 +108,9 @@ ON DUPLICATE KEY UPDATE
   legal_basis = new.legal_basis, source_url = new.source_url;
 
 -- TODO(C): 원문 확인 후 추가
---  - CONFINED: 감시인 배치(REQUIRED), 송기마스크 등 (2주차 밀폐 허가)
 --  - CONFINED: 가연성 가스는 "인화성물질 취급 설비 내부"일 때만 측정 대상 (P-94 6.3(1)(마)②) → 조건부 규칙 (3주차)
 --  - 작업 중 측정(DURING): 지하작업장·가스도관 굴착은 인화하한계 25% 이상이면 대피·점화원 중지 (기준규칙 제296조제2호)
 --  - 공통: 허가 유효시간 (P-94 4.6: 허가기간·일일 정상근무시간 이내, 익일 지속 시 재발급)
---  - HEIGHT: 2m 이상 작업 시 작업발판·안전대 (기준규칙 추락 방지 조항) (2주차 고소 허가)
+--  - HEIGHT: 제42조제4항 이동식 사다리 조건, 제43조 개구부 방호, 제44조 안전대 부착설비 (조건부, 3주차)
+--  - CONFINED: 제619조의2 측정 결과 부적합 시 공기호흡기·송기마스크 착용 (조건부, 3주차)
 --  - 공통: 허가 유효시간, 동일 구역 동시작업 충돌(CONFLICT)
