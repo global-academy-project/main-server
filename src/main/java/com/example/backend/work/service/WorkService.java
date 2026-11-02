@@ -43,6 +43,7 @@ public class WorkService {
     private final TbmWorkRepository tbmWorkRepository;
     private final TbmRecordRepository tbmRepository;
     private final WorkZoneRepository zoneRepository;
+    private final WorkWarningService warningService;
     private final SiteGuard siteGuard;
     private final Clock clock;
     private final int listMaxDays;
@@ -50,7 +51,8 @@ public class WorkService {
 
     public WorkService(WorkRepository workRepository, PermitRepository permitRepository,
                        RiskAssessmentRepository riskRepository, TbmWorkRepository tbmWorkRepository,
-                       TbmRecordRepository tbmRepository, WorkZoneRepository zoneRepository, SiteGuard siteGuard, Clock clock,
+                       TbmRecordRepository tbmRepository, WorkZoneRepository zoneRepository,
+                       WorkWarningService warningService, SiteGuard siteGuard, Clock clock,
                        @Value("${app.work.list.max-days}") int listMaxDays,
                        @Value("${app.work.list.max-rows}") int listMaxRows) {
         this.workRepository = workRepository;
@@ -59,6 +61,7 @@ public class WorkService {
         this.tbmWorkRepository = tbmWorkRepository;
         this.tbmRepository = tbmRepository;
         this.zoneRepository = zoneRepository;
+        this.warningService = warningService;
         this.siteGuard = siteGuard;
         this.clock = clock;
         this.listMaxDays = listMaxDays;
@@ -77,7 +80,8 @@ public class WorkService {
         Work work = new Work(r.siteId(), r.workDate(), r.title().trim(), r.description(),
                 r.workType(), r.startAt(), r.endAt(), r.workerCount(), user.getId());
         work.assignZone(r.zoneId());
-        work = workRepository.save(work);
+        work = workRepository.saveAndFlush(work);
+        warningService.warnForWork(work);   // 구역을 정했으면 그 구역 최근 아차사고로 경고 (시나리오 C)
         return WorkResponse.from(work);
     }
 

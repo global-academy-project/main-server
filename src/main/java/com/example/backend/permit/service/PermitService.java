@@ -30,6 +30,7 @@ import com.example.backend.site.service.SiteGuard;
 import com.example.backend.user.entity.User;
 import com.example.backend.work.entity.Work;
 import com.example.backend.work.repository.WorkRepository;
+import com.example.backend.work.repository.WorkWarningRepository;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import tools.jackson.databind.json.JsonMapper;
@@ -67,6 +68,7 @@ public class PermitService {
     private final RuleEvaluationRepository evaluationRepository;
     private final RuleViolationRepository violationRepository;
     private final RuleRepository ruleRepository;
+    private final WorkWarningRepository warningRepository;
     private final SiteGuard siteGuard;
     private final ApprovalService approvalService;
     private final JsonMapper jsonMapper;
@@ -75,7 +77,8 @@ public class PermitService {
     public PermitService(PermitRepository permitRepository, PermitMeasurementRepository measurementRepository,
                          WorkRepository workRepository, RuleCheckService ruleCheckService,
                          RuleEvaluationRepository evaluationRepository, RuleViolationRepository violationRepository,
-                         RuleRepository ruleRepository, SiteGuard siteGuard, ApprovalService approvalService,
+                         RuleRepository ruleRepository, WorkWarningRepository warningRepository,
+                         SiteGuard siteGuard, ApprovalService approvalService,
                          JsonMapper jsonMapper, Clock clock) {
         this.permitRepository = permitRepository;
         this.measurementRepository = measurementRepository;
@@ -84,6 +87,7 @@ public class PermitService {
         this.evaluationRepository = evaluationRepository;
         this.violationRepository = violationRepository;
         this.ruleRepository = ruleRepository;
+        this.warningRepository = warningRepository;
         this.siteGuard = siteGuard;
         this.approvalService = approvalService;
         this.jsonMapper = jsonMapper;
@@ -188,6 +192,12 @@ public class PermitService {
         }
         if (evaluation.getRulesApplied() == 0) {
             throw new BusinessException(ErrorCode.INVALID_STATE, "이 허가 종류는 아직 판정 규칙이 없어 승인 요청할 수 없습니다.");
+        }
+        int unacknowledged = permit.getWorkId() == null ? 0
+                : warningRepository.findByWorkIdAndAcknowledgedAtIsNullOrderByIdAsc(permit.getWorkId()).size();
+        if (unacknowledged > 0) {
+            throw new BusinessException(ErrorCode.INVALID_STATE, "확인하지 않은 작업 경고가 " + unacknowledged
+                    + "건 있습니다. 경고를 확인(조치 기록)한 뒤 승인 요청해 주세요.");
         }
         permit.submit();
         permitRepository.saveAndFlush(permit);
