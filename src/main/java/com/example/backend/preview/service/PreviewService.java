@@ -7,6 +7,9 @@ import com.example.backend.approval.repository.ApprovalRepository;
 import com.example.backend.approval.service.ApprovalService;
 import com.example.backend.common.exception.BusinessException;
 import com.example.backend.common.exception.ErrorCode;
+import com.example.backend.inspection.dto.InspectionResponse;
+import com.example.backend.inspection.entity.InspectionStatus;
+import com.example.backend.inspection.service.InspectionService;
 import com.example.backend.permit.dto.PermitResponse;
 import com.example.backend.permit.entity.Permit;
 import com.example.backend.permit.entity.PermitStatus;
@@ -47,6 +50,7 @@ public class PreviewService {
     private final RiskAssessmentService riskService;
     private final RiskAssessmentRepository riskRepository;
     private final TbmService tbmService;
+    private final InspectionService inspectionService;
     private final WorkService workService;
     private final ApprovalService approvalService;
     private final ApprovalRepository approvalRepository;
@@ -55,7 +59,7 @@ public class PreviewService {
 
     public PreviewService(PermitService permitService, PermitRepository permitRepository,
                           RiskAssessmentService riskService, RiskAssessmentRepository riskRepository,
-                          TbmService tbmService, WorkService workService,
+                          TbmService tbmService, InspectionService inspectionService, WorkService workService,
                           ApprovalService approvalService, ApprovalRepository approvalRepository,
                           JsonMapper jsonMapper, Clock clock) {
         this.permitService = permitService;
@@ -63,6 +67,7 @@ public class PreviewService {
         this.riskService = riskService;
         this.riskRepository = riskRepository;
         this.tbmService = tbmService;
+        this.inspectionService = inspectionService;
         this.workService = workService;
         this.approvalService = approvalService;
         this.approvalRepository = approvalRepository;
@@ -113,8 +118,17 @@ public class PreviewService {
                         mark == null ? null : mark.text(), mark == null, t.tbmDate() + " TBM", null,
                         jsonMapper.valueToTree(t), approval, now);
             }
+            case INSPECTION -> {
+                InspectionResponse i = inspectionService.get(userId, targetId);
+                PreviewMark mark = markOf(i.status());
+                WorkResponse work = i.workId() == null ? null : workService.get(userId, i.workId());
+                yield new PreviewResponse("INSPECTION", targetId, "INSPECTION", null, i.status().name(), mark,
+                        mark == null ? null : mark.text(), mark == null,
+                        i.inspectDate() + " " + (i.templateName() == null ? i.templateCode() : i.templateName()), work,
+                        jsonMapper.valueToTree(i), approval, now);
+            }
             default -> throw new BusinessException(ErrorCode.INVALID_REQUEST,
-                    "미리보기는 작업허가·위험성평가·TBM 만 지원합니다: " + type);
+                    "미리보기는 작업허가·위험성평가·TBM·점검표만 지원합니다: " + type);
         };
     }
 
@@ -154,6 +168,16 @@ public class PreviewService {
             case PENDING -> PreviewMark.PENDING;
             case REJECTED -> PreviewMark.REJECTED;
             case SUPERSEDED -> PreviewMark.SUPERSEDED;
+            case APPROVED -> null;
+        };
+    }
+
+    /** 점검표: 반려되면 바로 작성 중으로 돌아가므로 REJECTED 는 거의 없다 */
+    static PreviewMark markOf(InspectionStatus s) {
+        return switch (s) {
+            case DRAFT -> PreviewMark.DRAFT;
+            case PENDING -> PreviewMark.PENDING;
+            case REJECTED -> PreviewMark.REJECTED;
             case APPROVED -> null;
         };
     }
