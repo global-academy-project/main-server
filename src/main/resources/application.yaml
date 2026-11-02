@@ -82,6 +82,8 @@ app:
   dashboard:
     max-days: 31                    # 대시보드 기간 집계 최대 일수
     deadline-check-interval-ms: 300000   # 마감 알림(TBM·안전일지·개선조치·승인 지연) 확인 주기 (5분)
+  extract:
+    dictionary: classpath:extract/dictionary.json   # 문장 → 규칙 입력 추출 사전 (측정 항목 이름·단위·작업 종류 단서)
   inspection:
     templates: classpath:inspection/templates.json   # 점검표 양식 (항목 목록). 실무자 검증 전 초안
     list:
