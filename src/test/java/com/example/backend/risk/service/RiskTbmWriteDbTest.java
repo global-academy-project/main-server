@@ -160,7 +160,9 @@ class RiskTbmWriteDbTest {
 
         expectCode(() -> riskService.update(userId, r.riskAssessmentId(), risk(updated.lockVersion(),
                 item("x", "NO_SUCH_CODE", 1, 1))), ErrorCode.INVALID_REQUEST);
-        expectCode(() -> riskService.update(userId, r.riskAssessmentId(), risk(updated.lockVersion(),
+        // 위 실패 요청은 실제로는 롤백되지만 이 테스트는 한 트랜잭션이라 버전이 올라가 있을 수 있다 → 최신 버전으로
+        int latest = riskService.get(userId, r.riskAssessmentId()).lockVersion();
+        expectCode(() -> riskService.update(userId, r.riskAssessmentId(), risk(latest,
                 new SaveRiskAssessmentRequest.Item(1, "절단", "x", null, 2, 2, null, "대책", 1, null))), ErrorCode.INVALID_REQUEST);
     }
 

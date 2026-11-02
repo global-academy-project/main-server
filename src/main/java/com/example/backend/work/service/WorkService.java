@@ -6,6 +6,8 @@ import com.example.backend.permit.entity.Permit;
 import com.example.backend.permit.repository.PermitRepository;
 import com.example.backend.risk.entity.RiskAssessment;
 import com.example.backend.risk.repository.RiskAssessmentRepository;
+import com.example.backend.site.entity.WorkZone;
+import com.example.backend.site.repository.WorkZoneRepository;
 import com.example.backend.site.service.SiteGuard;
 import com.example.backend.tbm.entity.TbmRecord;
 import com.example.backend.tbm.entity.TbmWork;
@@ -40,6 +42,7 @@ public class WorkService {
     private final RiskAssessmentRepository riskRepository;
     private final TbmWorkRepository tbmWorkRepository;
     private final TbmRecordRepository tbmRepository;
+    private final WorkZoneRepository zoneRepository;
     private final SiteGuard siteGuard;
     private final Clock clock;
     private final int listMaxDays;
@@ -47,7 +50,7 @@ public class WorkService {
 
     public WorkService(WorkRepository workRepository, PermitRepository permitRepository,
                        RiskAssessmentRepository riskRepository, TbmWorkRepository tbmWorkRepository,
-                       TbmRecordRepository tbmRepository, SiteGuard siteGuard, Clock clock,
+                       TbmRecordRepository tbmRepository, WorkZoneRepository zoneRepository, SiteGuard siteGuard, Clock clock,
                        @Value("${app.work.list.max-days}") int listMaxDays,
                        @Value("${app.work.list.max-rows}") int listMaxRows) {
         this.workRepository = workRepository;
@@ -55,6 +58,7 @@ public class WorkService {
         this.riskRepository = riskRepository;
         this.tbmWorkRepository = tbmWorkRepository;
         this.tbmRepository = tbmRepository;
+        this.zoneRepository = zoneRepository;
         this.siteGuard = siteGuard;
         this.clock = clock;
         this.listMaxDays = listMaxDays;
@@ -67,8 +71,13 @@ public class WorkService {
         if (r.startAt() != null && r.endAt() != null && !r.endAt().isAfter(r.startAt())) {
             throw new BusinessException(ErrorCode.INVALID_REQUEST, "종료 시각은 시작 시각보다 뒤여야 합니다.");
         }
-        Work work = workRepository.save(new Work(r.siteId(), r.workDate(), r.title().trim(), r.description(),
-                r.workType(), r.startAt(), r.endAt(), r.workerCount(), user.getId()));
+        if (r.zoneId() != null && zoneRepository.findByIdAndSiteId(r.zoneId(), r.siteId()).filter(WorkZone::isActive).isEmpty()) {
+            throw new BusinessException(ErrorCode.INVALID_REQUEST, "이 현장의 사용 중인 구역이 아닙니다: " + r.zoneId());
+        }
+        Work work = new Work(r.siteId(), r.workDate(), r.title().trim(), r.description(),
+                r.workType(), r.startAt(), r.endAt(), r.workerCount(), user.getId());
+        work.assignZone(r.zoneId());
+        work = workRepository.save(work);
         return WorkResponse.from(work);
     }
 

@@ -92,8 +92,10 @@ public class SiteWorkerService {
             throw new BusinessException(ErrorCode.CONFLICT_MODIFIED);
         }
         checkTeam(r.teamId());
+        // 연락처는 응답에 없어 화면이 다시 보낼 수 없다: 안 보내면(null) 그대로, 빈 문자열이면 지움
+        String phone = r.phone() == null ? worker.getPhone() : r.phone();
         guard(() -> {
-            worker.update(r.name(), r.phone(), blank(r.jobType()), r.employmentType());
+            worker.update(r.name(), phone, blank(r.jobType()), r.employmentType());
             worker.changeTeam(r.teamId());
             return worker;
         });

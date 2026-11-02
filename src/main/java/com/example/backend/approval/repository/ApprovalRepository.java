@@ -21,6 +21,9 @@ public interface ApprovalRepository extends JpaRepository<Approval, Long> {
     Optional<Approval> findByTargetTypeAndTargetIdAndStatus(ApprovalTarget targetType, Long targetId,
                                                             ApprovalStatus status);
 
+    /** 그 기록의 가장 최근 결재 (문서 조회 응답의 결재 상태) */
+    Optional<Approval> findFirstByTargetTypeAndTargetIdOrderByRequestedAtDescIdDesc(ApprovalTarget targetType, Long targetId);
+
     /** 그 기록의 결재 이력 (최근 순) */
     List<Approval> findByTargetTypeAndTargetIdOrderByRequestedAtDescIdDesc(ApprovalTarget targetType, Long targetId);
 

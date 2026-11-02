@@ -1,7 +1,12 @@
 package com.example.backend.tbm.service;
 
+import com.example.backend.approval.entity.Approval;
+import com.example.backend.approval.entity.ApprovalTarget;
+import com.example.backend.approval.repository.ApprovalRepository;
 import com.example.backend.common.exception.BusinessException;
 import com.example.backend.common.exception.ErrorCode;
+import com.example.backend.site.entity.WorkZone;
+import com.example.backend.site.repository.WorkZoneRepository;
 import com.example.backend.site.service.SiteGuard;
 import com.example.backend.tbm.dto.TbmResponse;
 import com.example.backend.tbm.entity.TbmAttendee;
@@ -12,7 +17,9 @@ import com.example.backend.tbm.repository.TbmRecordRepository;
 import com.example.backend.tbm.repository.TbmWorkRepository;
 import com.example.backend.work.entity.Work;
 import com.example.backend.work.repository.WorkRepository;
+import com.example.backend.worker.entity.Team;
 import com.example.backend.worker.entity.Worker;
+import com.example.backend.worker.repository.TeamRepository;
 import com.example.backend.worker.repository.WorkerRepository;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -37,18 +44,26 @@ public class TbmService {
     private final TbmAttendeeRepository attendeeRepository;
     private final WorkRepository workRepository;
     private final WorkerRepository workerRepository;
+    private final TeamRepository teamRepository;
+    private final WorkZoneRepository zoneRepository;
+    private final ApprovalRepository approvalRepository;
     private final SiteGuard siteGuard;
     private final JsonMapper jsonMapper;
     private final Clock clock;
 
     public TbmService(TbmRecordRepository tbmRepository, TbmWorkRepository tbmWorkRepository,
                       TbmAttendeeRepository attendeeRepository, WorkRepository workRepository,
-                      WorkerRepository workerRepository, SiteGuard siteGuard, JsonMapper jsonMapper, Clock clock) {
+                      WorkerRepository workerRepository, TeamRepository teamRepository,
+                      WorkZoneRepository zoneRepository, ApprovalRepository approvalRepository,
+                      SiteGuard siteGuard, JsonMapper jsonMapper, Clock clock) {
         this.tbmRepository = tbmRepository;
         this.tbmWorkRepository = tbmWorkRepository;
         this.attendeeRepository = attendeeRepository;
         this.workRepository = workRepository;
         this.workerRepository = workerRepository;
+        this.teamRepository = teamRepository;
+        this.zoneRepository = zoneRepository;
+        this.approvalRepository = approvalRepository;
         this.siteGuard = siteGuard;
         this.jsonMapper = jsonMapper;
         this.clock = clock;
@@ -93,9 +108,16 @@ public class TbmService {
         List<TbmResponse.Attendee> people = attendees.stream()
                 .map(a -> new TbmResponse.Attendee(a.getWorkerId(), names.get(a.getWorkerId()), a.getHealthOk())).toList();
 
+        Team team = tbm.getTeamId() == null ? null : teamRepository.findById(tbm.getTeamId()).orElse(null);
+        WorkZone zone = tbm.getZoneId() == null ? null : zoneRepository.findById(tbm.getZoneId()).orElse(null);
+        Approval approval = approvalRepository
+                .findFirstByTargetTypeAndTargetIdOrderByRequestedAtDescIdDesc(ApprovalTarget.TBM, tbm.getId()).orElse(null);
+
         return new TbmResponse(tbm.getId(), tbm.getSiteId(), tbm.getTbmDate(), tbm.getHeldAt(), tbm.getLeaderName(),
                 tbm.getAttendeeCount(), points(tbm.getEducationPoints()), tbm.getHealthCheck(), tbm.getStatus(),
-                tbm.getWriterId(), tbm.getAgentRunId(), tbm.getLockVersion(), workRefs, people);
+                tbm.getWriterId(), tbm.getAgentRunId(), tbm.getLockVersion(),
+                tbm.getTeamId(), team == null ? null : team.getName(), tbm.getZoneId(), zone == null ? null : zone.getName(),
+                approval == null ? null : approval.getId(), approval == null ? null : approval.getStatus(), workRefs, people);
     }
 
     /** 교육 요점: JSON 배열 문자열 → 목록. 배열이 아니면(직접 쓴 글) 원문 한 줄 */

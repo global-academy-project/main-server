@@ -17,7 +17,7 @@ import java.util.List;
  *  - permits: 종류별 최신 판
  *  - riskAssessment / tbm: 최신 판·최근 날짜 하나, 없으면 null
  */
-public record WorkListItem(Long workId, Long siteId, LocalDate workDate, String title, WorkType workType,
+public record WorkListItem(Long workId, Long siteId, Long zoneId, LocalDate workDate, String title, WorkType workType,
                            boolean highRisk, LocalDateTime startAt, LocalDateTime endAt, Integer workerCount,
                            WorkStatus status, Long writerId, List<PermitBrief> permits, RiskBrief riskAssessment,
                            TbmBrief tbm) {
@@ -32,7 +32,7 @@ public record WorkListItem(Long workId, Long siteId, LocalDate workDate, String 
     }
 
     public static WorkListItem of(Work w, List<PermitBrief> permits, RiskBrief risk, TbmBrief tbm) {
-        return new WorkListItem(w.getId(), w.getSiteId(), w.getWorkDate(), w.getTitle(), w.getWorkType(), w.isHighRisk(),
+        return new WorkListItem(w.getId(), w.getSiteId(), w.getZoneId(), w.getWorkDate(), w.getTitle(), w.getWorkType(), w.isHighRisk(),
                 w.getStartAt(), w.getEndAt(), w.getWorkerCount(), w.getStatus(), w.getWriterId(), permits, risk, tbm);
     }
 }
