@@ -1,0 +1,82 @@
+{
+  "templates": [
+    {
+      "code": "ZONE_DAILY",
+      "name": "작업구역 일일 안전 점검",
+      "targetType": "ZONE",
+      "sections": [
+        {
+          "title": "탱크 구역 기본 안전",
+          "items": [
+            {"itemCode": "TANK_ACCESS", "question": "저장탱크 구역의 출입 통제와 안전 표지가 적절한가?", "detail": "출입 통제와 작업구역 표지 상태를 확인합니다."},
+            {"itemCode": "TANK_WALKWAY", "question": "탱크 주변 통로와 작업 발판에 걸림·미끄럼 위험이 없는가?", "detail": "맨홀 주변을 포함해 유출·누출 흔적과 통행로를 확인합니다."},
+            {"itemCode": "TANK_LEAK", "question": "탱크·배관·밸브에서 누출 또는 이상 흔적이 없는가?", "detail": "이상 발견 시 설비를 안전하게 격리하고 보고합니다."}
+          ]
+        },
+        {
+          "title": "화학물질 및 작업환경",
+          "items": [
+            {"itemCode": "CHEMICAL_LABEL", "question": "취급 물질의 용기 표시와 보관 상태가 적절한가?", "detail": "취급 위치와 보관 한도를 확인합니다."},
+            {"itemCode": "CHEMICAL_MSDS", "question": "취급 물질의 최신 MSDS를 현장에서 확인할 수 있는가?", "detail": "비치된 MSDS 개정일과 비상조치 정보를 확인합니다."},
+            {"itemCode": "SPILL_RESPONSE", "question": "유출 대응 자재가 준비되어 있고 즉시 사용할 수 있는가?", "detail": "흡착포와 유출 확산 방지 수단의 위치·상태를 확인합니다."},
+            {"itemCode": "VENTILATION", "question": "작업구역의 환기 및 필요한 가스 측정 상태가 적절한가?", "detail": "실제 작업과 허가 조건에 맞는 측정 기준을 확인합니다."}
+          ]
+        },
+        {
+          "title": "비상·보호 장비",
+          "items": [
+            {"itemCode": "EMERGENCY_EYEWASH", "question": "비상 세안·세척 설비에 접근할 수 있고 정상 작동하는가?", "detail": "접근 경로가 막히지 않았는지와 설비 상태를 확인합니다."},
+            {"itemCode": "FIRE_EQUIPMENT", "question": "소화기 등 초기 화재 대응 장비를 즉시 사용할 수 있는가?", "detail": "장비 위치, 접근성, 외관상 이상을 확인합니다."},
+            {"itemCode": "PPE_READY", "question": "해당 작업에 필요한 개인보호구를 준비하고 사용할 수 있는가?", "detail": "실제 작업 종류와 현장 위험에 맞는 보호구를 확인합니다."}
+          ]
+        }
+      ]
+    },
+    {
+      "code": "ZONE_HOT_WORK",
+      "name": "화기작업 구역 점검",
+      "targetType": "ZONE",
+      "sections": [
+        {
+          "title": "화재 예방",
+          "items": [
+            {"itemCode": "COMBUSTIBLES_CLEARED", "question": "작업 반경 안의 가연물을 치우거나 덮었는가?", "detail": "치울 수 없는 가연물은 방화포로 덮었는지 확인합니다."},
+            {"itemCode": "SPARK_BLANKET", "question": "불티 비산방지포를 설치했는가?", "detail": "개구부·하부층으로 불티가 떨어지지 않게 막았는지 확인합니다."},
+            {"itemCode": "EXTINGUISHER_READY", "question": "작업 장소에 소화기를 비치했는가?", "detail": "사용 가능한 소화기가 바로 손닿는 곳에 있는지 확인합니다."},
+            {"itemCode": "FIRE_WATCH", "question": "화재감시자를 지정해 배치했는가?", "detail": "작업 중과 작업 후 감시 시간을 정했는지 확인합니다."}
+          ]
+        },
+        {
+          "title": "장비·측정",
+          "items": [
+            {"itemCode": "GRINDER_GUARD", "question": "그라인더 방호덮개가 부착되어 있는가?", "detail": "덮개 손상·탈거 여부를 확인합니다."},
+            {"itemCode": "GAS_MEASURED", "question": "작업 전 가연성 가스를 측정해 기준 이내인가?", "detail": "측정값은 작업허가서의 측정 기록과 같아야 합니다."},
+            {"itemCode": "WELDER_CABLE", "question": "용접기 케이블·접지 상태에 이상이 없는가?", "detail": "피복 손상과 접지 연결을 확인합니다."}
+          ]
+        }
+      ]
+    },
+    {
+      "code": "EQUIPMENT_DAILY",
+      "name": "설비 일상 점검",
+      "targetType": "EQUIPMENT",
+      "sections": [
+        {
+          "title": "외관·작동",
+          "items": [
+            {"itemCode": "EXTERIOR", "question": "설비 외관에 균열·변형·누유 등 이상이 없는가?", "detail": "눈으로 보이는 손상과 누출 흔적을 확인합니다."},
+            {"itemCode": "SAFETY_DEVICE", "question": "방호장치·비상정지 장치가 정상 작동하는가?", "detail": "작동 시험이 가능한 장치는 실제로 눌러 확인합니다."},
+            {"itemCode": "INSPECTION_VALID", "question": "정기 점검·교정 기한이 지나지 않았는가?", "detail": "설비의 다음 점검·교정일을 확인합니다."}
+          ]
+        },
+        {
+          "title": "작업 전 확인",
+          "items": [
+            {"itemCode": "OPERATOR_QUALIFIED", "question": "운전자가 필요한 자격·교육을 갖추었는가?", "detail": "자격이 필요한 설비는 자격증을 확인합니다."},
+            {"itemCode": "AREA_CLEAR", "question": "설비 주변 작업 반경에 출입 통제가 되어 있는가?", "detail": "작업 반경 표시와 통제 상태를 확인합니다."}
+          ]
+        }
+      ]
+    }
+  ]
+}

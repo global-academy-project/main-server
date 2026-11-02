@@ -154,6 +154,12 @@ public class Inspection {
         this.status = InspectionStatus.REJECTED;
     }
 
+    /** 반려된 점검표를 작성 중으로 되돌려 고친다 (같은 기록, 계획서 7-5장) */
+    public void reopen() {
+        requireStatus(InspectionStatus.REJECTED);
+        this.status = InspectionStatus.DRAFT;
+    }
+
     private void requireStatus(InspectionStatus expected) {
         if (status != expected) {
             throw new IllegalStateException("상태가 " + expected + " 일 때만 할 수 있습니다 (현재 " + status + ").");

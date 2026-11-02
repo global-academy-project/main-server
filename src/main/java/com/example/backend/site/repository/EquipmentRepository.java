@@ -13,4 +13,8 @@ public interface EquipmentRepository extends JpaRepository<Equipment, Long> {
     List<Equipment> findBySiteIdAndEquipmentTypeAndActiveTrueOrderByCodeAsc(Long siteId, String equipmentType);
 
     Optional<Equipment> findByIdAndSiteId(Long id, Long siteId);
+
+    List<Equipment> findBySiteIdOrderByCodeAsc(Long siteId);
+
+    boolean existsBySiteIdAndCode(Long siteId, String code);
 }
