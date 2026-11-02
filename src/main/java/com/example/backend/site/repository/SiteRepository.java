@@ -8,4 +8,8 @@ import java.util.List;
 public interface SiteRepository extends JpaRepository<Site, Long> {
 
     List<Site> findByActiveTrueOrderByNameAsc();
+
+    List<Site> findAllByOrderByNameAsc();
+
+    boolean existsByName(String name);
 }
