@@ -1,9 +1,11 @@
 package com.example.backend.risk.service;
 
 import com.example.backend.approval.entity.ApprovalTarget;
+import com.example.backend.approval.repository.ApprovalRepository;
 import com.example.backend.approval.service.ApprovalService;
 import com.example.backend.common.exception.BusinessException;
 import com.example.backend.common.exception.ErrorCode;
+import com.example.backend.common.jpa.LockVersions;
 import com.example.backend.history.entity.HistoryAction;
 import com.example.backend.history.entity.HistoryTarget;
 import com.example.backend.history.entity.RecordHistory;
@@ -55,11 +57,14 @@ public class RiskAssessmentService {
     private final SiteGuard siteGuard;
     private final ApprovalService approvalService;
     private final JsonMapper jsonMapper;
+    private final LockVersions lockVersions;
+    private final ApprovalRepository approvalRepository;
 
     public RiskAssessmentService(RiskAssessmentRepository riskRepository, RiskAssessmentItemRepository itemRepository,
                                  WorkRepository workRepository, TagCodeRepository tagCodeRepository,
                                  RecordHistoryRepository historyRepository, RiskLevelPolicy levelPolicy,
-                                 SiteGuard siteGuard, ApprovalService approvalService, JsonMapper jsonMapper) {
+                                 SiteGuard siteGuard, ApprovalService approvalService, JsonMapper jsonMapper,
+                                 LockVersions lockVersions, ApprovalRepository approvalRepository) {
         this.riskRepository = riskRepository;
         this.itemRepository = itemRepository;
         this.workRepository = workRepository;
@@ -69,6 +74,8 @@ public class RiskAssessmentService {
         this.siteGuard = siteGuard;
         this.approvalService = approvalService;
         this.jsonMapper = jsonMapper;
+        this.lockVersions = lockVersions;
+        this.approvalRepository = approvalRepository;
     }
 
     @Transactional(readOnly = true)
@@ -129,6 +136,7 @@ public class RiskAssessmentService {
         }
         applyContent(risk, r, formDataOf(r.formData(), risk.getFormData()));
         replaceItems(risk, r.items());
+        lockVersions.bumpOnce(risk, risk.getId(), r.lockVersion(), risk::getLockVersion);   // 위험요인만 바뀌어도 올린다
         history(risk, HistoryAction.UPDATE, userId, r.items().size());
         return response(risk);
     }
@@ -245,7 +253,8 @@ public class RiskAssessmentService {
 
     private RiskAssessmentResponse response(RiskAssessment risk) {
         List<RiskAssessmentItem> items = itemRepository.findByAssessmentIdOrderBySeqAsc(risk.getId());
-        return RiskAssessmentResponse.of(risk, items, levelPolicy::levelOf);
+        return RiskAssessmentResponse.of(risk, items, levelPolicy::levelOf, approvalRepository
+                .findFirstByTargetTypeAndTargetIdOrderByRequestedAtDescIdDesc(ApprovalTarget.RISK, risk.getId()).orElse(null));
     }
 
     /** 엔티티 입력 검증 오류를 400 으로 */

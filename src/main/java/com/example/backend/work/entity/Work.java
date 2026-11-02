@@ -111,6 +111,11 @@ public class Work {
     public Long getTeamId() { return teamId; }
     public WorkStatus getStatus() { return status; }
     public Long getWriterId() { return writerId; }
+    /** 작업구역 지정 (같은 현장 구역인지는 서비스에서 확인) */
+    public void assignZone(Long zoneId) {
+        this.zoneId = zoneId;
+    }
+
     /** 에이전트가 만든 작업이면 실행 id */
     public void linkRun(Long agentRunId) {
         this.agentRunId = agentRunId;

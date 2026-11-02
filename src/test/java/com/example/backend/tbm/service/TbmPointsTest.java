@@ -10,7 +10,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 @DisplayName("TBM 교육 요점")
 class TbmPointsTest {
 
-    private final TbmService service = new TbmService(null, null, null, null, null, null,
+    private final TbmService service = new TbmService(null, null, null, null, null, null, null, null, null,
             JsonMapper.builder().build(), null);
 
     @Test

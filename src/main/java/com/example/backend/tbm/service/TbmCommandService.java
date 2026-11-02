@@ -28,7 +28,7 @@ import com.example.backend.work.entity.Work;
 import com.example.backend.work.repository.WorkRepository;
 import com.example.backend.worker.repository.TeamRepository;
 import com.example.backend.worker.repository.WorkerSiteRepository;
-import jakarta.persistence.EntityManager;
+import com.example.backend.common.jpa.LockVersions;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import tools.jackson.databind.json.JsonMapper;
@@ -59,7 +59,7 @@ public class TbmCommandService {
     private final TbmService tbmService;
     private final SiteGuard siteGuard;
     private final JsonMapper jsonMapper;
-    private final EntityManager entityManager;
+    private final LockVersions lockVersions;
 
     public TbmCommandService(TbmRecordRepository tbmRepository, TbmWorkRepository tbmWorkRepository,
                              TbmAttendeeRepository attendeeRepository, WorkRepository workRepository,
@@ -67,7 +67,7 @@ public class TbmCommandService {
                              WorkerSiteRepository workerSiteRepository, ApprovalRepository approvalRepository,
                              ApprovalService approvalService, RecordHistoryRepository historyRepository,
                              TbmService tbmService, SiteGuard siteGuard, JsonMapper jsonMapper,
-                             EntityManager entityManager) {
+                             LockVersions lockVersions) {
         this.tbmRepository = tbmRepository;
         this.tbmWorkRepository = tbmWorkRepository;
         this.attendeeRepository = attendeeRepository;
@@ -81,7 +81,7 @@ public class TbmCommandService {
         this.tbmService = tbmService;
         this.siteGuard = siteGuard;
         this.jsonMapper = jsonMapper;
-        this.entityManager = entityManager;
+        this.lockVersions = lockVersions;
     }
 
     @Transactional
@@ -106,6 +106,7 @@ public class TbmCommandService {
         guard(() -> tbm.updateContent(r.teamId(), r.zoneId(), r.tbmDate(), trim(r.leaderName()), points(r), trim(r.healthCheck())));
         tbmRepository.saveAndFlush(tbm);
         replaceLinks(tbm, r);
+        lockVersions.bumpOnce(tbm, tbm.getId(), r.lockVersion(), tbm::getLockVersion);   // 작업·참석자만 바뀌어도 올린다
         history(tbm, HistoryAction.UPDATE, userId);
         return tbmService.get(userId, tbmId);
     }
@@ -119,7 +120,7 @@ public class TbmCommandService {
         attendeeRepository.deleteAll(old);
         attendeeRepository.flush();
         saveAttendeeRows(tbm, r.attendees());
-        bumpVersion(tbm);   // 참석자만 바뀌어도 lockVersion 을 올려 동시 수정을 막는다
+        lockVersions.bumpOnce(tbm, tbm.getId(), r.lockVersion(), tbm::getLockVersion);   // 참석자만 바뀌어도 올린다
         history(tbm, HistoryAction.UPDATE, userId);
         return tbmService.get(userId, tbmId);
     }
@@ -231,21 +232,6 @@ public class TbmCommandService {
         }
         attendees.forEach((workerId, ok) -> attendeeRepository.save(TbmAttendee.of(tbm, workerId, ok)));
         attendeeRepository.flush();
-    }
-
-    /**
-     * TBM 행은 그대로이고 참석자만 바뀐 경우 lockVersion 을 1 올린다.
-     * 그 사이 다른 사람이 바꿨으면(버전이 다르면) 409. 올린 뒤 엔티티를 DB 값으로 다시 읽는다.
-     */
-    private void bumpVersion(TbmRecord tbm) {
-        entityManager.flush();
-        int updated = entityManager.createQuery("update TbmRecord t set t.lockVersion = t.lockVersion + 1"
-                        + " where t.id = :id and t.lockVersion = :v")
-                .setParameter("id", tbm.getId()).setParameter("v", tbm.getLockVersion()).executeUpdate();
-        if (updated != 1) {
-            throw new BusinessException(ErrorCode.CONFLICT_MODIFIED);
-        }
-        entityManager.refresh(tbm);
     }
 
     private static void requireVersion(TbmRecord tbm, Integer lockVersion) {
