@@ -32,4 +32,17 @@ public class SiteGuard {
         }
         return user;
     }
+
+    /**
+     * 현장 관리 권한(현장 관리자 이상: SITE_ADMIN, 회사 관리자)이 있으면 사용자를 돌려준다. 없으면 403 FORBIDDEN.
+     * 구역·작업자 배치 같은 현장 기준 정보를 바꿀 때 쓴다.
+     */
+    public User requireSiteAdmin(Long userId, Long siteId) {
+        User user = requireAccess(userId, siteId);
+        String role = siteAccessService.roleAt(user, siteId).orElse(null);
+        if (!"SITE_ADMIN".equals(role) && !"ADMIN".equals(role)) {
+            throw new BusinessException(ErrorCode.FORBIDDEN, "현장 관리자만 바꿀 수 있습니다.");
+        }
+        return user;
+    }
 }

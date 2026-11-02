@@ -14,4 +14,7 @@ public interface WorkZoneRepository extends JpaRepository<WorkZone, Long> {
     Optional<WorkZone> findByIdAndSiteId(Long id, Long siteId);
 
     boolean existsBySiteIdAndCode(Long siteId, String code);
+
+    /** 사용 중지 구역 포함 (관리 화면) */
+    List<WorkZone> findBySiteIdOrderByCodeAsc(Long siteId);
 }

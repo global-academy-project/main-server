@@ -10,4 +10,9 @@ public interface TeamRepository extends JpaRepository<Team, Long> {
     List<Team> findByActiveTrueOrderByNameAsc();
 
     boolean existsByName(String name);
+
+    boolean existsByBusinessNo(String businessNo);
+
+    /** 관리 화면: 사용 중지 팀 포함 */
+    List<Team> findAllByOrderByNameAsc();
 }
