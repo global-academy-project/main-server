@@ -1,0 +1,22 @@
+[
+  {"id": 1, "text": "탱크 안에서 용접할 건데 산소 농도가 17.5%야", "workTypes": ["HOT", "CONFINED"], "measurement": {"O2": 17.5}},
+  {"id": 2, "text": "R-201 맨홀 들어가요. 산소 20.9%, 황화수소 3ppm, 일산화탄소 5ppm 나왔어", "workTypes": ["CONFINED"], "zone": "R-201", "measurement": {"O2": 20.9, "H2S": 3, "CO": 5}},
+  {"id": 3, "text": "반응기 하부 배관 그라인더 절단, 가연성 가스 0%LEL", "workTypes": ["HOT"], "zone": "R-201", "measurement": {"LEL": 0}},
+  {"id": 4, "text": "O2 19.5% CO2 0.3% CO 12ppm H2S 0ppm LEL 2%", "workTypes": [], "measurement": {"O2": 19.5, "CO2": 0.3, "CO": 12, "H2S": 0, "LEL": 2}},
+  {"id": 5, "text": "화기작업이고 화재감시자는 김철수가 맡아요", "workTypes": ["HOT"], "form": {"watcher_name": "김철수"}},
+  {"id": 6, "text": "밀폐공간 작업, 감시인 박영희 배치, 탄산가스 0.8퍼센트", "workTypes": ["CONFINED"], "form": {"watcher_name": "박영희"}, "measurement": {"CO2": 0.8}},
+  {"id": 7, "text": "높이 3m 배관랙 보온재 교체", "workTypes": ["HEIGHT"]},
+  {"id": 8, "text": "1.5m 높이 선반 정리", "workTypes": []},
+  {"id": 9, "text": "비계 위에서 도장 작업", "workTypes": ["HEIGHT"]},
+  {"id": 10, "text": "산소절단기로 철판 자르기", "workTypes": ["HOT"]},
+  {"id": 11, "text": "산소는 아직 안 쟀고 황화수소만 2ppm", "workTypes": [], "measurement": {"H2S": 2}},
+  {"id": 12, "text": "산소 농도 18", "workTypes": [], "measurement": {"O2": 18}, "notes": ["O2"]},
+  {"id": 13, "text": "황화수소 5% 나옴", "workTypes": [], "notes": ["H2S"]},
+  {"id": 14, "text": "산소 19%였다가 다시 재니까 산소 21%", "workTypes": [], "notes": ["O2"]},
+  {"id": 15, "text": "감시자 없음, 탱크 내부 청소", "workTypes": ["CONFINED"]},
+  {"id": 16, "text": "암모니아 25 ppm, 염소 0.5ppm", "workTypes": [], "measurement": {"NH3": 25, "CL2": 0.5}},
+  {"id": 17, "text": "작업자 3명이 2시간 동안 산소 측정 후 진행", "workTypes": []},
+  {"id": 18, "text": "일산화탄소는 20피피엠이고 CO2는 1.2%", "workTypes": [], "measurement": {"CO": 20, "CO2": 1.2}},
+  {"id": 19, "text": "R-201 탱크 내부 용접, 인화성 가스 5% LEL, 산소 20%", "workTypes": ["HOT", "CONFINED"], "zone": "R-201", "measurement": {"LEL": 5, "O2": 20}},
+  {"id": 20, "text": "일반 배관 볼트 교체", "workTypes": []}
+]
