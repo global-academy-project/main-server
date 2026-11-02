@@ -14,5 +14,7 @@ public interface RecordTagRepository extends JpaRepository<RecordTag, Long> {
     /** 축·값으로 기록 찾기 (예: SUBSTANCE 108-88-3 이 붙은 아차사고) */
     List<RecordTag> findByRecordTypeAndAxisAndValue(RecordType recordType, TagAxis axis, String value);
 
+    List<RecordTag> findByRecordTypeAndRecordIdIn(RecordType recordType, java.util.Collection<Long> recordIds);
+
     boolean existsByRecordTypeAndRecordIdAndAxisAndValue(RecordType recordType, Long recordId, TagAxis axis, String value);
 }
