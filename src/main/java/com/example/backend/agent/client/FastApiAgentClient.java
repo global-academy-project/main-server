@@ -45,7 +45,7 @@ public class FastApiAgentClient implements AgentClient {
                               @Value("${app.agent.read-timeout-seconds}") long readTimeoutSeconds,
                               @Value("${app.internal.token}") String token,
                               JsonMapper jsonMapper) {
-        // uvicorn 은 HTTP/1.1 만 쓰므로 h2c 업그레이드를 막는다 (OCR 클라이언트와 같음)
+        // uvicorn 은 HTTP/1.1 만 쓰므로 h2c 업그레이드를 막는다
         HttpClient httpClient = HttpClient.newBuilder()
                 .version(HttpClient.Version.HTTP_1_1)
                 .connectTimeout(Duration.ofSeconds(connectTimeoutSeconds))

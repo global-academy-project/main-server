@@ -23,7 +23,7 @@ import java.util.Map;
 
 /**
  * AI 서버 결과를 한 트랜잭션에 저장한다: 실행 상태 + 단계 + 근거 + 답변 메시지.
- * 리스너와 분리된 빈이어야 @Transactional 이 적용된다 (OCR 과 같은 구조).
+ * 리스너와 분리된 빈이어야 @Transactional 이 적용된다.
  * 응답 전체는 agent_runs.output_json 에 그대로 남긴다 (slots·drafts·approvalGate 를 화면과 다음 요청이 그대로 쓴다).
  */
 @Service

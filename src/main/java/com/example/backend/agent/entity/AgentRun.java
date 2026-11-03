@@ -10,7 +10,7 @@ import java.time.LocalDateTime;
 
 /**
  * 에이전트 실행 한 번 (사용자 메시지 하나 = 실행 하나). 테이블 규칙은 V8 agent_runs.
- *  - 기존 ocr_runs 처럼: 실행 저장(PROCESSING) → 커밋 후 비동기로 AI 서버 호출 → 결과로 DONE / FAILED / WAITING_INPUT
+ *  - 실행 저장(PROCESSING) → 커밋 후 비동기로 AI 서버 호출 → 결과로 DONE / FAILED / WAITING_INPUT
  *  - check_rules 가 판정을 저장할 때 이 실행 id 를 외래키로 참조하므로, AI 서버 호출 전에 커밋돼 있어야 한다
  *  - 끝난 실행(DONE·FAILED)은 finished_at 필수, FAILED 는 error_message 필수 (DB CHECK)
  */

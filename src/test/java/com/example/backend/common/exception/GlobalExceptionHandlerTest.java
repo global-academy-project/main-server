@@ -21,12 +21,12 @@ class GlobalExceptionHandlerTest {
     @DisplayName("BusinessException 은 ErrorCode 의 HTTP 상태와 코드·메시지로 변환")
     void business() {
         ResponseEntity<ApiResponse<Void>> res =
-                handler.handleBusiness(new BusinessException(ErrorCode.ALREADY_PROCESSING));
+                handler.handleBusiness(new BusinessException(ErrorCode.INVALID_STATE));
 
         assertThat(res.getStatusCode()).isEqualTo(HttpStatus.CONFLICT);
         assertThat(res.getBody().success()).isFalse();
-        assertThat(res.getBody().error().code()).isEqualTo("ALREADY_PROCESSING");
-        assertThat(res.getBody().error().message()).isEqualTo("처리 중인 문서입니다.");
+        assertThat(res.getBody().error().code()).isEqualTo("INVALID_STATE");
+        assertThat(res.getBody().error().message()).isEqualTo("현재 상태에서는 할 수 없는 작업입니다.");
         assertThat(res.getBody().error().details()).isEmpty();
     }
 
