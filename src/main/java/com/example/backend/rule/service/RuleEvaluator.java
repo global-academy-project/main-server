@@ -68,6 +68,7 @@ public class RuleEvaluator {
         Set<String> unused = new TreeSet<>();
         collectLeafPaths(safeInput, "", unused);
         unused.removeAll(usedPaths);
+        unused.removeIf(p -> p.startsWith("source."));   // 문장 입력 원문·추출값 스냅샷 (판정 대상 아님)
 
         return new Judgement(resultOf(findings), rules.size(), List.copyOf(findings), List.copyOf(unused),
                 List.copyOf(checks));
