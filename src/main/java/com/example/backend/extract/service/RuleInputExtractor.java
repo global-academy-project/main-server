@@ -34,10 +34,12 @@ public class RuleInputExtractor {
     public record ZoneRef(Long id, String code, String name) {
     }
 
-    public record WorkTypeHit(WorkType type, String evidence) {
+    /** source: RULE / LLM / BOTH */
+    public record WorkTypeHit(WorkType type, String evidence, String source) {
     }
 
-    public record Value(MeasurementItem item, BigDecimal value, String unit, String evidence) {
+    /** source: RULE(사전) / LLM(LLM 만 찾음) / BOTH(둘이 같은 값) */
+    public record Value(MeasurementItem item, BigDecimal value, String unit, String evidence, String source) {
     }
 
     public record Result(String text, List<WorkTypeHit> workTypes, Long zoneId, String zoneEvidence,
@@ -116,7 +118,7 @@ public class RuleInputExtractor {
             }
         }
         List<WorkTypeHit> out = new ArrayList<>();
-        hits.forEach((k, v) -> out.add(new WorkTypeHit(k, v)));
+        hits.forEach((k, v) -> out.add(new WorkTypeHit(k, v, "RULE")));
         return out;
     }
 
@@ -168,7 +170,7 @@ public class RuleInputExtractor {
                 notes.add(item + ": 값 " + value.toPlainString() + "이(가) 측정 범위를 벗어나 비워 둡니다.");
                 continue;
             }
-            found.computeIfAbsent(item, k -> new ArrayList<>()).add(new Value(item, value, expected, evidence));
+            found.computeIfAbsent(item, k -> new ArrayList<>()).add(new Value(item, value, expected, evidence, "RULE"));
         }
         List<Value> out = new ArrayList<>();
         found.forEach((item, values) -> {

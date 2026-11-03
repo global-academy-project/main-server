@@ -119,8 +119,14 @@ public class PermitService {
             throw new BusinessException(ErrorCode.CONFLICT_MODIFIED);
         }
         checkPeriod(r.validFrom(), r.validTo());
+        // 문장 입력 스냅샷(form._source)은 화면이 빼고 보내도 지우지 않는다 (계획서 7-4장)
+        Map<String, Object> form = r.form() == null ? new LinkedHashMap<>() : new LinkedHashMap<>(r.form());
+        Object source = fromJson(permit.getFormData()).get(SOURCE_KEY);
+        if (source != null && !form.containsKey(SOURCE_KEY)) {
+            form.put(SOURCE_KEY, source);
+        }
         permit.updateContent(r.validFrom(), r.validTo(), blankToNull(r.watcherName()), blankToNull(r.supervisorName()),
-                toJson(r.form()));
+                toJson(form));
         permitRepository.saveAndFlush(permit);
         return toResponse(permit);
     }
@@ -207,17 +213,24 @@ public class PermitService {
 
     // ------------------------------------------------------------------ 내부
 
-    /** 규칙 입력: measurement = 항목별 최근 작업 전 측정값, form = 양식 값 + watcher_name (감시자 컬럼) */
+    /** 문장 입력 스냅샷 키 (form._source, extract 패키지가 넣는다) */
+    static final String SOURCE_KEY = "_source";
+
+    /** 규칙 입력: measurement = 항목별 최근 작업 전 측정값, form = 양식 값 + watcher_name (감시자 컬럼), source = 문장 입력 스냅샷 */
     Map<String, Object> ruleInput(Permit permit) {
         Map<String, Object> measurement = new LinkedHashMap<>();
         for (PermitMeasurement m : measurementRepository.findByPermitIdAndPhaseOrderByMeasuredAtAscIdAsc(permit.getId(), PRE_WORK)) {
             measurement.put(m.getItem().name(), m.getValue());   // 시각 순이라 마지막 값(최근 측정)이 남는다
         }
         Map<String, Object> form = new LinkedHashMap<>(fromJson(permit.getFormData()));
+        Object source = form.remove(SOURCE_KEY);
         form.put("watcher_name", permit.getWatcherName());
         Map<String, Object> input = new LinkedHashMap<>();
         input.put("measurement", measurement);
         input.put("form", form);
+        if (source != null) {
+            input.put("source", source);   // 문장 입력 원문·추출값: 판정 스냅샷에 함께 남는다 (판정에는 안 씀)
+        }
         return input;
     }
 
