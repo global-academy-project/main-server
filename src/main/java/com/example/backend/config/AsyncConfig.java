@@ -15,7 +15,7 @@ import org.springframework.scheduling.concurrent.ThreadPoolTaskExecutor;
  *  - 대기열까지 차면 받지 않고 경고 로그만 남긴다. 그 실행은 PROCESSING 으로 남았다가
  *    멈춘 실행 정리(AgentRunSweeper)가 AGENT_TIMEOUT 으로 정리한다 (요청 스레드에 예외를 던지지 않게)
  *  - 서버 종료 시 진행 중인 실행이 끝나기를 await-termination-seconds 까지 기다린다
- * 이름 없는 @Async(OCR)도 이 실행기를 함께 쓴다 (OCR 은 제거 예정).
+ * 이름 없는 @Async 도 이 실행기를 함께 쓴다.
  */
 @Configuration
 @EnableAsync
