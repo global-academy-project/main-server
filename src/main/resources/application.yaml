@@ -61,7 +61,7 @@ app:
     mode: ${MAIL_MODE:log}
     from: ${MAIL_FROM:no-reply@example.com}
   storage:
-    dir: ./storage                  # 첨부·인쇄 PDF 저장 루트 (계획서 11장 파일 저장, 2주차 첨부 업로드에서 사용)
+    dir: ${APP_STORAGE_DIR:./storage}   # 첨부·인쇄 PDF 저장 루트 (계획서 11장 파일 저장)
   internal:
     # FastAPI → Spring 내부 API 인증 (/internal/**). 비어 있으면 기동 실패시키도록 구현할 것
     token: ${INTERNAL_API_TOKEN:}
@@ -82,6 +82,9 @@ app:
     llm:
       client: ${APP_EXTRACT_LLM_CLIENT:none}   # none(규칙 추출만, 기본) | fastapi(ai-model LLM 보강, 로컬 모델이라 CLOSED 에서도 가능)
       timeout-seconds: ${APP_EXTRACT_LLM_TIMEOUT_SECONDS:30}   # LLM 추출 응답 대기 (CPU 4B 모델 기준). 넘으면 규칙 추출 결과만 보여 준다
+  attachment:
+    max-bytes: 20971520             # 사진 한 장 최대 크기 (20MB, spring.servlet.multipart.max-file-size 와 같게)
+    max-per-owner: 20               # 기록 하나에 붙일 수 있는 사진 장수
   daily-log:
     list:
       max-days: 92                  # 안전일지 목록 한 번에 볼 수 있는 기간(일)
