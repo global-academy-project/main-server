@@ -7,6 +7,9 @@ import com.example.backend.approval.repository.ApprovalRepository;
 import com.example.backend.approval.service.ApprovalService;
 import com.example.backend.common.exception.BusinessException;
 import com.example.backend.common.exception.ErrorCode;
+import com.example.backend.dailylog.dto.DailyLogResponse;
+import com.example.backend.dailylog.entity.DailyLogStatus;
+import com.example.backend.dailylog.service.DailyLogService;
 import com.example.backend.inspection.dto.InspectionResponse;
 import com.example.backend.inspection.entity.InspectionStatus;
 import com.example.backend.inspection.service.InspectionService;
@@ -51,6 +54,7 @@ public class PreviewService {
     private final RiskAssessmentRepository riskRepository;
     private final TbmService tbmService;
     private final InspectionService inspectionService;
+    private final DailyLogService dailyLogService;
     private final WorkService workService;
     private final ApprovalService approvalService;
     private final ApprovalRepository approvalRepository;
@@ -59,7 +63,8 @@ public class PreviewService {
 
     public PreviewService(PermitService permitService, PermitRepository permitRepository,
                           RiskAssessmentService riskService, RiskAssessmentRepository riskRepository,
-                          TbmService tbmService, InspectionService inspectionService, WorkService workService,
+                          TbmService tbmService, InspectionService inspectionService, DailyLogService dailyLogService,
+                          WorkService workService,
                           ApprovalService approvalService, ApprovalRepository approvalRepository,
                           JsonMapper jsonMapper, Clock clock) {
         this.permitService = permitService;
@@ -68,6 +73,7 @@ public class PreviewService {
         this.riskRepository = riskRepository;
         this.tbmService = tbmService;
         this.inspectionService = inspectionService;
+        this.dailyLogService = dailyLogService;
         this.workService = workService;
         this.approvalService = approvalService;
         this.approvalRepository = approvalRepository;
@@ -127,8 +133,15 @@ public class PreviewService {
                         i.inspectDate() + " " + (i.templateName() == null ? i.templateCode() : i.templateName()), work,
                         jsonMapper.valueToTree(i), approval, now);
             }
+            case DAILY_LOG -> {
+                DailyLogResponse l = dailyLogService.get(userId, targetId);
+                PreviewMark mark = markOf(l.status());
+                yield new PreviewResponse("DAILY_LOG", targetId, "DAILY_LOG", null, l.status().name(), mark,
+                        mark == null ? null : mark.text(), mark == null, l.date() + " 일일 안전일지", null,
+                        jsonMapper.valueToTree(l), approval, now);
+            }
             default -> throw new BusinessException(ErrorCode.INVALID_REQUEST,
-                    "미리보기는 작업허가·위험성평가·TBM·점검표만 지원합니다: " + type);
+                    "미리보기는 작업허가·위험성평가·TBM·점검표·안전일지만 지원합니다: " + type);
         };
     }
 
@@ -178,6 +191,15 @@ public class PreviewService {
             case DRAFT -> PreviewMark.DRAFT;
             case PENDING -> PreviewMark.PENDING;
             case REJECTED -> PreviewMark.REJECTED;
+            case APPROVED -> null;
+        };
+    }
+
+    /** 안전일지: 반려·회수되면 작성 중으로 돌아간다 */
+    static PreviewMark markOf(DailyLogStatus s) {
+        return switch (s) {
+            case DRAFT -> PreviewMark.DRAFT;
+            case PENDING -> PreviewMark.PENDING;
             case APPROVED -> null;
         };
     }
