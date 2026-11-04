@@ -57,3 +57,5 @@ out/
 *.nar
 !gradle/wrapper/gradle-wrapper.jar
 !.mvn/wrapper/maven-wrapper.jar
+# 첨부·인쇄 PDF 저장소 (app.storage.dir)
+storage/
