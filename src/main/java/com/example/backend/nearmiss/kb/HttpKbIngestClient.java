@@ -17,8 +17,9 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * kb-ingest 호출: POST {app.kb-ingest.base-url}/ingest/chunks, Authorization: Bearer KB_INGEST_API_TOKEN.
- * 요청 {collection, chunks[{point_id, text, payload}]} → 응답 {"indexed": n}.
+ * kb-ingest 호출. Authorization: Bearer KB_INGEST_API_TOKEN.
+ *   POST {app.kb-ingest.base-url}/ingest/chunks         {collection, chunks[{point_id, text, payload}]} → {"indexed": n}
+ *   POST {app.kb-ingest.base-url}/ingest/points/delete  {collection, point_ids[]} (1~32개) → {"deleted": n}
  * 토큰·본문은 로그에 남기지 않는다. 2xx 가 아니면 상태 코드만 담아 예외.
  */
 @Component
@@ -26,6 +27,7 @@ import java.util.Map;
 public class HttpKbIngestClient implements KbIngestClient {
 
     static final String PATH = "/ingest/chunks";
+    static final String DELETE_PATH = "/ingest/points/delete";
 
     private final RestClient restClient;
     private final JsonMapper jsonMapper;
@@ -62,7 +64,19 @@ public class HttpKbIngestClient implements KbIngestClient {
             m.put("payload", c.payload());
             return m;
         }).toList());
-        String raw = restClient.post().uri(PATH).contentType(MediaType.APPLICATION_JSON).accept(MediaType.APPLICATION_JSON)
+        return post(PATH, body, "indexed");
+    }
+
+    @Override
+    public int delete(String collection, List<String> pointIds) {
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("collection", collection);
+        body.put("point_ids", pointIds);
+        return post(DELETE_PATH, body, "deleted");
+    }
+
+    private int post(String path, Map<String, Object> body, String countField) {
+        String raw = restClient.post().uri(path).contentType(MediaType.APPLICATION_JSON).accept(MediaType.APPLICATION_JSON)
                 .header("Authorization", "Bearer " + token)
                 .body(jsonMapper.writeValueAsString(body))
                 .exchange((req, res) -> {
@@ -71,10 +85,10 @@ public class HttpKbIngestClient implements KbIngestClient {
                     }
                     return new String(res.getBody().readAllBytes(), StandardCharsets.UTF_8);
                 });
-        JsonNode indexed = jsonMapper.readTree(raw).get("indexed");
-        if (indexed == null || !indexed.isNumber()) {
+        JsonNode count = jsonMapper.readTree(raw).get(countField);
+        if (count == null || !count.isNumber()) {
             throw new IllegalStateException("kb-ingest 응답 모양이 다릅니다.");
         }
-        return indexed.asInt();
+        return count.asInt();
     }
 }

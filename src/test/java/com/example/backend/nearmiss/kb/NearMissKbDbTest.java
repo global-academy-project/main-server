@@ -35,7 +35,7 @@ import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-/** 아차사고 태그 저장 → 적재 이벤트, 청크 만들기(실제 DB), 적재 호출 (실제 DB, 끝나면 롤백) */
+/** 아차사고 태그 저장 → RAG 이벤트, 청크 만들기, 적재·삭제 호출 (실제 DB, 끝나면 롤백) */
 @SpringBootTest
 @Transactional
 @RecordApplicationEvents
@@ -68,7 +68,7 @@ class NearMissKbDbTest {
     }
 
     @Test
-    @DisplayName("보고만 하면 적재하지 않고, 사람이 태그를 저장하면 이벤트 → 현장·태그가 실린 청크")
+    @DisplayName("보고만 하면 보내지 않고, 태그 저장 → 적재, 태그를 모두 지우면 → 삭제")
     void tagsSavedThenDocument() {
         NearMissResponse n = service.report(reporter, new ReportNearMissRequest(siteId, zoneId, null, "발판 미끄러짐",
                 LocalDateTime.now().minusHours(1), "점검 중 발판이 미끄러져 넘어질 뻔함", "발판 고정"));
@@ -90,27 +90,41 @@ class NearMissKbDbTest {
                 .containsEntry("work_type", List.of("HEIGHT"));
         assertThat(c.text()).startsWith("발판 미끄러짐. 점검 중").contains("장소: 배관 랙.", "발생형태: 떨어짐.", "작업: 고소.", "중대도: 아차사고.", "즉시 조치: 발판 고정");
 
-        // 적재 호출: 켜져 있으면 kb_accidents 로 한 건, 꺼져 있으면 부르지 않음, 실패해도 예외를 밖으로 내지 않음
+        // 태그 있음 → 적재: 켜져 있으면 kb_accidents 로 한 건, 꺼져 있으면 부르지 않음, 실패해도 예외를 밖으로 내지 않음
         List<String> calls = new ArrayList<>();
-        KbIngestClient fake = new KbIngestClient() {
-            public boolean enabled() { return true; }
-            public int upsert(String collection, List<Chunk> chunks) {
-                calls.add(collection + ":" + chunks.get(0).pointId());
-                return 1;
-            }
-        };
-        assertThat(new NearMissKbListener(fake, documents).ingest(n.nearMissId())).isTrue();
-        assertThat(calls).containsExactly("kb_accidents:" + c.pointId());
-        assertThat(new NearMissKbListener(new NoKbIngestClient(), documents).ingest(n.nearMissId())).isFalse();
+        KbIngestClient fake = recording(calls);
+        assertThat(new NearMissKbListener(fake, documents).sync(n.nearMissId())).isTrue();
+        assertThat(calls).containsExactly("upsert kb_accidents:" + c.pointId());
+        assertThat(new NearMissKbListener(new NoKbIngestClient(), documents).sync(n.nearMissId())).isFalse();
         KbIngestClient broken = new KbIngestClient() {
             public boolean enabled() { return true; }
             public int upsert(String collection, List<Chunk> chunks) { throw new IllegalStateException("kb-ingest 응답 502"); }
+            public int delete(String collection, List<String> pointIds) { throw new IllegalStateException("kb-ingest 응답 502"); }
         };
-        assertThat(new NearMissKbListener(broken, documents).ingest(n.nearMissId())).isFalse();
+        assertThat(new NearMissKbListener(broken, documents).sync(n.nearMissId())).isFalse();
 
-        // 태그를 모두 지우면 이벤트 없음
+        // 태그를 모두 지움 → 이벤트는 나가고, 같은 point_id 로 삭제
         NearMissResponse latest = service.get(reporter, n.nearMissId());
         service.saveTags(reporter, n.nearMissId(), new SaveTagsRequest(latest.lockVersion(), List.of()));
-        assertThat(events.stream(NearMissTagsSavedEvent.class)).hasSize(1);
+        assertThat(events.stream(NearMissTagsSavedEvent.class)).hasSize(2);
+        assertThat(documents.document(n.nearMissId())).isEmpty();
+        calls.clear();
+        assertThat(new NearMissKbListener(fake, documents).sync(n.nearMissId())).isTrue();
+        assertThat(calls).containsExactly("delete kb_accidents:" + c.pointId());
+        assertThat(new NearMissKbListener(broken, documents).sync(n.nearMissId())).isFalse();
+    }
+
+    private static KbIngestClient recording(List<String> calls) {
+        return new KbIngestClient() {
+            public boolean enabled() { return true; }
+            public int upsert(String collection, List<Chunk> chunks) {
+                calls.add("upsert " + collection + ":" + chunks.get(0).pointId());
+                return 1;
+            }
+            public int delete(String collection, List<String> pointIds) {
+                calls.add("delete " + collection + ":" + pointIds.get(0));
+                return pointIds.size();
+            }
+        };
     }
 }

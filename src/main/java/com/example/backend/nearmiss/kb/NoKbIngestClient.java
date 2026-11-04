@@ -19,4 +19,9 @@ public class NoKbIngestClient implements KbIngestClient {
     public int upsert(String collection, List<Chunk> chunks) {
         return 0;
     }
+
+    @Override
+    public int delete(String collection, List<String> pointIds) {
+        return 0;
+    }
 }

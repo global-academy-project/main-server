@@ -236,9 +236,7 @@ public class NearMissService {
         lockVersions.bumpOnce(n, n.getId(), r.lockVersion(), n::getLockVersion);
         history(n, HistoryAction.UPDATE, user.getId(), Map.of("tags", wanted.values().stream()
                 .map(t -> t.axis() + ":" + t.value() + ":" + t.source()).toList()));
-        if (!wanted.isEmpty()) {
-            events.publishEvent(new NearMissTagsSavedEvent(n.getId()));   // 사람이 저장한 태그 → 커밋 뒤 RAG 적재 (NearMissKbListener)
-        }
+        events.publishEvent(new NearMissTagsSavedEvent(n.getId()));   // 커밋 뒤 RAG 맞추기: 태그 있으면 적재, 없으면 삭제 (NearMissKbListener)
         return responses(List.of(n)).get(0);
     }
 
