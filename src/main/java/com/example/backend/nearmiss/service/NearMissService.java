@@ -12,6 +12,7 @@ import com.example.backend.nearmiss.dto.NearMissResponse;
 import com.example.backend.nearmiss.dto.ReportNearMissRequest;
 import com.example.backend.nearmiss.dto.SaveTagsRequest;
 import com.example.backend.nearmiss.dto.TagCodeResponse;
+import com.example.backend.nearmiss.kb.NearMissTagsSavedEvent;
 import com.example.backend.nearmiss.entity.NearMiss;
 import com.example.backend.nearmiss.repository.NearMissRepository;
 import com.example.backend.site.entity.WorkZone;
@@ -30,6 +31,7 @@ import com.example.backend.user.repository.UserRepository;
 import com.example.backend.work.repository.WorkRepository;
 import com.example.backend.work.service.WorkWarningService;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -84,6 +86,7 @@ public class NearMissService {
     private final int searchDefaultLimit;
     private final int searchMaxLimit;
     private final int searchScanRows;
+    private final ApplicationEventPublisher events;
 
     public NearMissService(NearMissRepository nearMissRepository, RecordTagRepository tagRepository,
                            TagCodeRepository codeRepository, WorkZoneRepository zoneRepository,
@@ -95,7 +98,8 @@ public class NearMissService {
                            @Value("${app.near-miss.list.max-rows}") int listMaxRows,
                            @Value("${app.near-miss.search.default-limit}") int searchDefaultLimit,
                            @Value("${app.near-miss.search.max-limit}") int searchMaxLimit,
-                           @Value("${app.near-miss.search.scan-rows}") int searchScanRows) {
+                           @Value("${app.near-miss.search.scan-rows}") int searchScanRows,
+                           ApplicationEventPublisher events) {
         this.nearMissRepository = nearMissRepository;
         this.tagRepository = tagRepository;
         this.codeRepository = codeRepository;
@@ -114,6 +118,7 @@ public class NearMissService {
         this.searchDefaultLimit = searchDefaultLimit;
         this.searchMaxLimit = searchMaxLimit;
         this.searchScanRows = searchScanRows;
+        this.events = events;
     }
 
     /** 사용 중인 태그 코드 (축·순서대로). 물질(CAS)은 코드표가 없다 */
@@ -231,6 +236,9 @@ public class NearMissService {
         lockVersions.bumpOnce(n, n.getId(), r.lockVersion(), n::getLockVersion);
         history(n, HistoryAction.UPDATE, user.getId(), Map.of("tags", wanted.values().stream()
                 .map(t -> t.axis() + ":" + t.value() + ":" + t.source()).toList()));
+        if (!wanted.isEmpty()) {
+            events.publishEvent(new NearMissTagsSavedEvent(n.getId()));   // 사람이 저장한 태그 → 커밋 뒤 RAG 적재 (NearMissKbListener)
+        }
         return responses(List.of(n)).get(0);
     }
 
