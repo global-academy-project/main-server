@@ -25,6 +25,7 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.transaction.annotation.Transactional;
+import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.json.JsonMapper;
 
 import java.time.LocalDate;
@@ -187,6 +188,58 @@ class AgentRunFlowDbTest {
         AgentRunStarted retry = send(run.conversationId(), "다시");
         assertThat(jsonMapper.readValue(runRepository.findById(retry.runId()).orElseThrow().getInputJson(), RunInput.class)
                 .slots()).isNull();
+    }
+
+    /**
+     * 시나리오를 못 정한 응답 (B 11/04 slots 안내 2장, ai-model agent_work_service._ask_result 모양):
+     * slots 는 WorkSlots 전체가 빈 값으로 오고 pendingText 만 채워짐. steps·drafts 없음, 분류 비어 있음
+     */
+    private static final String UNKNOWN = """
+            {"runStatus": "WAITING_INPUT",
+             "slots": {"utterances": [], "location": null, "headcount": null, "workDate": null, "startTime": null,
+                       "endTime": null, "measurements": {}, "askedKeys": [], "askedOptionalKeys": [], "pendingText": "안녕하세요"},
+             "ask": {"message": "어떤 일을 하시려는지 알려 주세요.", "missing_fields": []},
+             "classification": {"workTypes": [], "highRisk": null}}
+            """;
+
+    @Test
+    @DisplayName("B 11/04 slots: 못 정한 응답 저장·조회, 새 필드(pendingText·askedOptionalKeys) 그대로 전달, 실패 뒤엔 직전 성공 slots")
+    void slotsPassThrough() {
+        // 1) 시나리오를 못 정한 응답: steps·drafts 가 없어도 WAITING_INPUT 으로 저장되고 ASK_USER 단계만 남는다
+        AgentRunStarted first = send(null, "안녕하세요");
+        writer.saveSuccess(first.runId(), jsonMapper.readTree(UNKNOWN), 300);
+        em.flush();
+        AgentRunDetail d1 = service.getRun(userId, first.runId());
+        assertThat(d1.status()).isEqualTo(AgentRunStatus.WAITING_INPUT);
+        assertThat(d1.steps()).extracting(AgentRunDetail.Step::type).containsExactly(AgentStepType.ASK_USER);
+        assertThat(d1.result().path("slots").path("pendingText").asString()).isEqualTo("안녕하세요");
+
+        // 2) 다음 메시지: pendingText 만 있는 slots 를 그대로, mode 는 현장 모드
+        AgentRunStarted second = send(first.conversationId(), "내일 R-201 용접이요");
+        RunInput in2 = jsonMapper.readValue(runRepository.findById(second.runId()).orElseThrow().getInputJson(), RunInput.class);
+        assertThat(in2.slots().path("pendingText").asString()).isEqualTo("안녕하세요");
+        assertThat(runRepository.findById(second.runId()).orElseThrow().getMode()).isEqualTo(AgentMode.GUIDE);
+
+        // 3) 되묻기 응답에 새 필드 askedOptionalKeys → 실패 → 다시 보내면 실패를 건너뛰고 직전 성공 slots (결정 (a))
+        writer.saveSuccess(second.runId(), jsonMapper.readTree("""
+                {"runStatus": "WAITING_INPUT",
+                 "slots": {"utterances": ["내일 R-201 용접이요"], "askedKeys": ["start_time"], "askedOptionalKeys": ["lel"]},
+                 "ask": {"message": "몇 시에 시작하나요?", "missing_fields": [{"key": "start_time"}]}}
+                """), 500);
+        AgentRunStarted third = send(first.conversationId(), "9시");
+        writer.saveFailure(third.runId(), "AI_TIMEOUT", "시간 초과", null, 120000);
+        em.flush();
+        AgentRunStarted retry = send(first.conversationId(), "9시");
+        JsonNode slots = jsonMapper.readValue(runRepository.findById(retry.runId()).orElseThrow().getInputJson(), RunInput.class).slots();
+        assertThat(slots.path("askedOptionalKeys").get(0).asString()).isEqualTo("lel");
+        assertThat(slots.path("askedKeys").get(0).asString()).isEqualTo("start_time");
+
+        // 4) DONE 뒤 다음 말도 DONE 응답의 slots 를 그대로 보낸다 (같은 작업 이어 가기)
+        writer.saveSuccess(retry.runId(), jsonMapper.readTree(DONE), 900);
+        em.flush();
+        AgentRunStarted after = send(first.conversationId(), "인원은 4명");
+        JsonNode slotsAfterDone = jsonMapper.readValue(runRepository.findById(after.runId()).orElseThrow().getInputJson(), RunInput.class).slots();
+        assertThat(slotsAfterDone.path("utterances").size()).isEqualTo(2);
     }
 
     @Test
