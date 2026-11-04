@@ -17,13 +17,14 @@ import java.util.concurrent.atomic.AtomicReference;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
-/** kb-ingest 호출: 경로·Bearer 토큰·본문 모양, 실패 응답 */
+/** kb-ingest 호출: 경로·Bearer 토큰·본문 모양 (적재·삭제), 실패 응답 */
 @DisplayName("kb-ingest 클라이언트")
 class HttpKbIngestClientTest {
 
     private static final String TOKEN = "ingest-token";
     private final JsonMapper jsonMapper = JsonMapper.builder().build();
     private HttpServer server;
+    private final AtomicReference<String> seenPath = new AtomicReference<>();
 
     @AfterEach
     void stop() {
@@ -33,7 +34,8 @@ class HttpKbIngestClientTest {
     private HttpKbIngestClient start(int status, String body, AtomicReference<String> seenBody,
                                      AtomicReference<String> seenAuth) throws IOException {
         server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
-        server.createContext(HttpKbIngestClient.PATH, ex -> {
+        server.createContext("/ingest/", ex -> {
+            seenPath.set(ex.getRequestURI().getPath());
             seenBody.set(new String(ex.getRequestBody().readAllBytes(), StandardCharsets.UTF_8));
             seenAuth.set(ex.getRequestHeaders().getFirst("Authorization"));
             byte[] out = body.getBytes(StandardCharsets.UTF_8);
@@ -57,12 +59,32 @@ class HttpKbIngestClientTest {
                 "d91aab42-939e-5a48-9ff5-e915506f3736", "문장", Map.of("site_id", 3, "flagged", false))));
 
         assertThat(indexed).isEqualTo(1);
+        assertThat(seenPath.get()).isEqualTo("/ingest/chunks");
         assertThat(auth.get()).isEqualTo("Bearer " + TOKEN);
         JsonNode sent = jsonMapper.readTree(body.get());
         assertThat(sent.path("collection").asString()).isEqualTo("kb_accidents");
         assertThat(sent.path("chunks").get(0).path("point_id").asString()).isEqualTo("d91aab42-939e-5a48-9ff5-e915506f3736");
         assertThat(sent.path("chunks").get(0).path("text").asString()).isEqualTo("문장");
         assertThat(sent.path("chunks").get(0).path("payload").path("site_id").asInt()).isEqualTo(3);
+    }
+
+    @Test
+    @DisplayName("삭제: POST /ingest/points/delete, Bearer 토큰, {collection, point_ids} → deleted")
+    void delete() throws IOException {
+        AtomicReference<String> body = new AtomicReference<>();
+        AtomicReference<String> auth = new AtomicReference<>();
+        HttpKbIngestClient client = start(200, "{\"deleted\": 1}", body, auth);
+
+        int deleted = client.delete("kb_accidents", List.of("d91aab42-939e-5a48-9ff5-e915506f3736"));
+
+        assertThat(deleted).isEqualTo(1);
+        assertThat(seenPath.get()).isEqualTo("/ingest/points/delete");
+        assertThat(auth.get()).isEqualTo("Bearer " + TOKEN);
+        JsonNode sent = jsonMapper.readTree(body.get());
+        assertThat(sent.path("collection").asString()).isEqualTo("kb_accidents");
+        assertThat(sent.path("point_ids").size()).isEqualTo(1);
+        assertThat(sent.path("point_ids").get(0).asString()).isEqualTo("d91aab42-939e-5a48-9ff5-e915506f3736");
+        assertThat(sent.has("chunks")).isFalse();
     }
 
     @Test
@@ -74,6 +96,8 @@ class HttpKbIngestClientTest {
         stop();
         HttpKbIngestClient odd = start(200, "{\"ok\": true}", new AtomicReference<>(), new AtomicReference<>());
         assertThatThrownBy(() -> odd.upsert("kb_accidents", List.of(new KbIngestClient.Chunk("id", "t", Map.of()))))
+                .isInstanceOf(IllegalStateException.class);
+        assertThatThrownBy(() -> odd.delete("kb_accidents", List.of("id")))   // 삭제 응답에 deleted 가 없음
                 .isInstanceOf(IllegalStateException.class);
         assertThatThrownBy(() -> new HttpKbIngestClient("http://127.0.0.1:1", 3, " ", jsonMapper))
                 .isInstanceOf(IllegalStateException.class);

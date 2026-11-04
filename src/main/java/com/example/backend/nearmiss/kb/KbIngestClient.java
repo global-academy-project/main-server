@@ -17,4 +17,7 @@ public interface KbIngestClient {
 
     /** POST /ingest/chunks. 적재한 청크 수 */
     int upsert(String collection, List<Chunk> chunks);
+
+    /** POST /ingest/points/delete. 삭제를 요청한 point 수 (없는 id 를 넣어도 성공, 실제로 지운 수가 아님) */
+    int delete(String collection, List<String> pointIds);
 }
