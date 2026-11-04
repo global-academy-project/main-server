@@ -31,4 +31,8 @@ public interface NearMissRepository extends JpaRepository<NearMiss, Long> {
     /** 같은 구역 최근 아차사고 (시나리오 C 경고). from = 오늘 - sites.near_miss_warn_days */
     List<NearMiss> findBySiteIdAndZoneIdAndOccurredAtGreaterThanEqualOrderByOccurredAtDesc(
             Long siteId, Long zoneId, LocalDateTime from);
+
+    /** 그날 아차사고 (일일 안전일지 집계). to 는 다음 날 0시 (미포함) */
+    List<NearMiss> findBySiteIdAndOccurredAtGreaterThanEqualAndOccurredAtLessThanOrderByOccurredAtAscIdAsc(
+            Long siteId, LocalDateTime from, LocalDateTime to);
 }

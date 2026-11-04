@@ -9,7 +9,7 @@ import java.time.LocalDateTime;
 /**
  * 문서 미리보기 (저장하지 않음, 파일도 만들지 않음). 화면은 formType·formSchemaVersion 으로 양식(스키마 렌더러·인쇄 템플릿)을 고르고
  * content 를 채운 뒤, mark 가 있으면 markText 를 워터마크로 보여 준다.
- *  - targetType: PERMIT · RISK · TBM
+ *  - targetType: PERMIT · RISK · TBM · INSPECTION · DAILY_LOG
  *  - formType: HOT_WORK_PERMIT · CONFINED_SPACE_PERMIT · HEIGHT_WORK_PERMIT · RISK_ASSESSMENT · TBM
  *  - status: 문서 상태 그대로 (예: PENDING)
  *  - mark / markText: 표시 문구. official=true(승인된 정식 문서)면 null
