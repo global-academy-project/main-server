@@ -85,6 +85,12 @@ app:
   attachment:
     max-bytes: 20971520             # 사진 한 장 최대 크기 (20MB, spring.servlet.multipart.max-file-size 와 같게)
     max-per-owner: 20               # 기록 하나에 붙일 수 있는 사진 장수
+  kb-ingest:
+    # 아차사고 RAG 적재 (A kb-ingest POST /ingest/chunks). none(기본, 적재 안 함) | http
+    client: ${APP_KB_INGEST_CLIENT:none}
+    base-url: ${APP_KB_INGEST_BASE_URL:http://localhost:8001}   # compose 안에서는 http://kb-ingest:8001
+    token: ${KB_INGEST_API_TOKEN:}  # http 일 때 필수. 값은 환경 변수로만
+    timeout-seconds: 10
   daily-log:
     list:
       max-days: 92                  # 안전일지 목록 한 번에 볼 수 있는 기간(일)
