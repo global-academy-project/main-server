@@ -1,5 +1,6 @@
 package com.example.backend.agent.service;
 
+import com.example.backend.agent.dto.AgentConversationItem;
 import com.example.backend.agent.dto.AgentMessageItem;
 import com.example.backend.agent.dto.AgentRunDetail;
 import com.example.backend.agent.dto.AgentRunStarted;
@@ -17,6 +18,7 @@ import com.example.backend.site.repository.SiteRepository;
 import com.example.backend.site.service.SiteGuard;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.ApplicationEventPublisher;
+import org.springframework.data.domain.PageRequest;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import tools.jackson.databind.JsonNode;
@@ -28,6 +30,8 @@ import java.time.LocalDateTime;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.function.Function;
+import java.util.stream.Collectors;
 
 /**
  * 에이전트 실행 시작과 조회 (작업 등록 대화, 기록 질문).
@@ -197,6 +201,30 @@ public class AgentRunService {
                 .filter(m -> m.getRole() != MessageRole.TOOL)
                 .map(m -> new AgentMessageItem(m.getId(), m.getSeq(), m.getRole(), m.getContent(), m.getRunId(), m.getCreatedAt()))
                 .toList();
+    }
+
+    /** 지난 대화 목록에서 한 번에 돌려주는 최대 수 */
+    static final int CONVERSATION_LIMIT_MAX = 50;
+
+    /**
+     * 내 지난 대화 (만든 사람만, 한 현장 · 한 종류). 읽기만 한다.
+     * 현장 권한이 없어지면 그 현장 대화도 못 본다 (requireAccess). limit 은 1~50 으로 맞춘다.
+     */
+    @Transactional(readOnly = true)
+    public List<AgentConversationItem> listConversations(Long userId, Long siteId, AgentTaskType taskType, int limit) {
+        siteGuard.requireAccess(userId, siteId);
+        int size = Math.max(1, Math.min(limit, CONVERSATION_LIMIT_MAX));
+        List<AgentConversation> conversations = conversationRepository.findRecent(userId, siteId, taskType, PageRequest.of(0, size));
+        if (conversations.isEmpty()) {
+            return List.of();
+        }
+        Map<Long, AgentRun> lastRuns = runRepository.findLastRuns(conversations.stream().map(AgentConversation::getId).toList())
+                .stream().collect(Collectors.toMap(AgentRun::getConversationId, Function.identity()));
+        return conversations.stream().map(c -> {
+            AgentRun last = lastRuns.get(c.getId());
+            return new AgentConversationItem(c.getId(), c.getSiteId(), taskType, c.getTitle(), c.getMessageCount(),
+                    c.getLastMessageAt(), c.isPinned(), last == null ? null : last.getId(), last == null ? null : last.getStatus());
+        }).toList();
     }
 
     /** 응답 대기 시간이 지나도록 PROCESSING 인 실행인가 */
