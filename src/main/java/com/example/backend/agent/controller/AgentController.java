@@ -1,10 +1,12 @@
 package com.example.backend.agent.controller;
 
+import com.example.backend.agent.dto.AgentConversationItem;
 import com.example.backend.agent.dto.AgentMessageItem;
 import com.example.backend.agent.dto.AgentRunDetail;
 import com.example.backend.agent.dto.AgentRunStarted;
 import com.example.backend.agent.dto.StartRecordQueryRequest;
 import com.example.backend.agent.dto.StartWorkRegisterRequest;
+import com.example.backend.agent.entity.AgentTaskType;
 import com.example.backend.agent.service.AgentRunService;
 import com.example.backend.common.response.ApiResponse;
 import jakarta.validation.Valid;
@@ -47,6 +49,18 @@ public class AgentController {
     @GetMapping("/runs/{runId}")
     public ApiResponse<AgentRunDetail> run(@AuthenticationPrincipal Long userId, @PathVariable Long runId) {
         return ApiResponse.ok(agentRunService.getRun(userId, runId));
+    }
+
+    /**
+     * 내 지난 대화 목록 (한 현장 · 한 종류: 기록 질문 탭은 RECORD_QUERY, 작업 등록 탭은 WORK_REGISTER). 읽기 전용.
+     * 고정 먼저, 그다음 최근 메시지 순. limit 1~50 (기본 30). 다시 열기는 /conversations/{id}/messages + /runs/{lastRunId}
+     */
+    @GetMapping("/conversations")
+    public ApiResponse<List<AgentConversationItem>> conversations(@AuthenticationPrincipal Long userId,
+                                                                  @RequestParam Long siteId,
+                                                                  @RequestParam AgentTaskType taskType,
+                                                                  @RequestParam(defaultValue = "30") int limit) {
+        return ApiResponse.ok(agentRunService.listConversations(userId, siteId, taskType, limit));
     }
 
     @GetMapping("/conversations/{conversationId}/messages")
