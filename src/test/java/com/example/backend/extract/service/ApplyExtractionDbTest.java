@@ -69,6 +69,11 @@ class ApplyExtractionDbTest {
                 Map.of("spark_prevention", true))).permitId();
     }
 
+    /** 컨트롤러와 같은 순서: 추출(트랜잭션 밖) → 반영 */
+    private PermitResponse apply(ApplyExtractionRequest request) {
+        return service.apply(adminId, permitId, request, service.extractFor(adminId, permitId, request.text()));
+    }
+
     private ApplyExtractionRequest request(int lockVersion, Map<String, Object> form) {
         return new ApplyExtractionRequest(lockVersion, TEXT,
                 List.of(new ApplyExtractionRequest.Measurement(MeasurementItem.LEL, BigDecimal.ZERO)), form);
@@ -79,7 +84,7 @@ class ApplyExtractionDbTest {
     void applyAndSnapshot() throws Exception {
         PermitResponse before = permitService.get(adminId, permitId);
 
-        PermitResponse after = service.apply(adminId, permitId, request(before.lockVersion(),
+        PermitResponse after = apply(request(before.lockVersion(),
                 Map.of("watcher_name", "김철수", "extinguisher_ready", true, "flammable_vapor_removed", true)));
 
         assertThat(after.watcherName()).isEqualTo("김철수");
@@ -102,7 +107,7 @@ class ApplyExtractionDbTest {
     @Test
     @DisplayName("화면이 수정 때 _source 를 빼고 보내도 스냅샷은 남는다")
     void sourceKeptOnUpdate() {
-        PermitResponse applied = service.apply(adminId, permitId, request(permitService.get(adminId, permitId).lockVersion(),
+        PermitResponse applied = apply(request(permitService.get(adminId, permitId).lockVersion(),
                 Map.of("extinguisher_ready", true)));
 
         PermitResponse updated = permitService.update(adminId, permitId, new UpdatePermitRequest(FROM, TO, "김감시", "이반장",
@@ -115,7 +120,7 @@ class ApplyExtractionDbTest {
     @DisplayName("이 허가 종류에 없는 양식 항목 400, 예전 lockVersion 409")
     void validation() {
         int v = permitService.get(adminId, permitId).lockVersion();
-        expectCode(() -> service.apply(adminId, permitId, request(v, Map.of("harness_worn", true))), ErrorCode.INVALID_REQUEST);
-        expectCode(() -> service.apply(adminId, permitId, request(v + 1, Map.of())), ErrorCode.CONFLICT_MODIFIED);
+        expectCode(() -> apply(request(v, Map.of("harness_worn", true))), ErrorCode.INVALID_REQUEST);
+        expectCode(() -> apply(request(v + 1, Map.of())), ErrorCode.CONFLICT_MODIFIED);
     }
 }
