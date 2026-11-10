@@ -24,6 +24,8 @@ public class PermitExtractionController {
     @PostMapping("/api/v1/permits/{permitId}/extraction")
     public ApiResponse<PermitResponse> apply(@AuthenticationPrincipal Long userId, @PathVariable Long permitId,
                                              @Valid @RequestBody ApplyExtractionRequest request) {
-        return ApiResponse.ok(service.apply(userId, permitId, request));
+        // 추출(LLM 호출이 있을 수 있음)은 저장 트랜잭션 밖에서 먼저, 저장은 그다음 한 트랜잭션으로
+        var extraction = service.extractFor(userId, permitId, request.text());
+        return ApiResponse.ok(service.apply(userId, permitId, request, extraction));
     }
 }

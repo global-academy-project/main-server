@@ -75,6 +75,11 @@ public class RuleInputExtractor {
         return dict.version();
     }
 
+    /** 측정 항목의 사전 규칙 (받는 단위·최대값). LLM 추출값 확인에 쓴다 (LlmExtractionVerifier) */
+    public ExtractDictionary.Measurement measurementRule(MeasurementItem item) {
+        return dict.measurements().stream().filter(m -> m.item().equals(item.name())).findFirst().orElse(null);
+    }
+
     public Result extract(String text, List<ZoneRef> zones) {
         String t = text == null ? "" : text.strip();
         List<String> notes = new ArrayList<>();

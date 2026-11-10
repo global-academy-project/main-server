@@ -7,7 +7,7 @@ import java.util.List;
 
 /**
  * LLM 추출 결과 (ai-model POST /api/v1/extract/rule-input 의 data). 서버는 이 값을 그대로 믿지 않고
- * ExtractionMerger 가 원문·단위·규칙 추출과 대조한 뒤에만 쓴다.
+ * LlmExtractionVerifier 가 원문·단위·범위를 확인한 뒤에만 쓴다.
  */
 @JsonIgnoreProperties(ignoreUnknown = true)
 public record LlmExtraction(List<Measurement> measurements, List<WorkTypeHit> workTypes, String watcherName,

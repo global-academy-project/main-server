@@ -33,7 +33,8 @@ import java.util.stream.Collectors;
  * 확인한 추출값을 허가서에 넣고 원문·추출값 스냅샷을 남긴다 (계획서 7-4장 "무슨 말을 듣고 막았나").
  * <ul>
  *   <li>측정값은 작업 전 측정값으로 추가 (기존 측정값 API 와 같음), 양식 값은 합친다</li>
- *   <li>양식 form._source 에 {text, extractor, extracted(서버 규칙 추출), confirmed(사용자 확인값), confirmedBy, confirmedAt}</li>
+ *   <li>양식 form._source 에 {text, extractor, extracted(서버 추출: LLM 켜짐이면 LLM 확인값, 아니면 사전), confirmed(사용자 확인값), confirmedBy, confirmedAt}</li>
+ *   <li>추출(LLM 호출 가능)은 저장 트랜잭션 밖에서 먼저 한다: 컨트롤러가 extractFor → apply 순서로 부른다</li>
  *   <li>판정 입력에는 source 로 따로 들어가 판정 스냅샷(rule_evaluations.input_json)에 함께 남는다</li>
  *   <li>최근 판정은 무효가 되므로 다시 판정해야 승인 요청할 수 있다</li>
  * </ul>
@@ -65,8 +66,16 @@ public class ExtractApplyService {
         this.clock = clock;
     }
 
+    /** 반영 전에 서버 추출을 다시 한다 (미리 보기와 같은 순서, 트랜잭션 밖). 권한 확인 포함 */
+    public RuleInputExtractService.Extraction extractFor(Long userId, Long permitId, String text) {
+        Permit permit = permitRepository.findById(permitId)
+                .orElseThrow(() -> new BusinessException(ErrorCode.PERMIT_NOT_FOUND));
+        siteGuard.requireAccess(userId, permit.getSiteId());
+        return extractService.run(text, permit.getSiteId());
+    }
+
     @Transactional
-    public PermitResponse apply(Long userId, Long permitId, ApplyExtractionRequest r) {
+    public PermitResponse apply(Long userId, Long permitId, ApplyExtractionRequest r, RuleInputExtractService.Extraction extraction) {
         Permit permit = permitRepository.findById(permitId)
                 .orElseThrow(() -> new BusinessException(ErrorCode.PERMIT_NOT_FOUND));
         User user = siteGuard.requireAccess(userId, permit.getSiteId());
@@ -96,7 +105,7 @@ public class ExtractApplyService {
                 merged.put(e.getKey(), e.getValue());
             }
         }
-        RuleInputExtractor.Result extracted = extractService.ruleOnly(r.text(), permit.getSiteId());
+        RuleInputExtractor.Result extracted = extraction.result();
         Map<String, Object> extractedValues = new LinkedHashMap<>();
         extracted.measurements().forEach(v -> extractedValues.put(v.item().name(), v.value()));
         Map<String, Object> confirmed = new LinkedHashMap<>();
@@ -107,7 +116,7 @@ public class ExtractApplyService {
         confirmed.put("form", new LinkedHashMap<>(form));
         Map<String, Object> source = new LinkedHashMap<>();
         source.put("text", r.text().strip());
-        source.put("extractor", extractService.ruleVersion());
+        source.put("extractor", extraction.extractor());
         source.put("extracted", Map.of("measurement", extractedValues, "form", extracted.form(),
                 "workTypes", extracted.workTypes().stream().map(t -> t.type().name()).toList()));
         source.put("confirmed", confirmed);
