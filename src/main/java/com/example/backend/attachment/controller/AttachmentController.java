@@ -1,9 +1,11 @@
 package com.example.backend.attachment.controller;
 
 import com.example.backend.attachment.dto.AttachmentResponse;
+import com.example.backend.attachment.dto.CorrectPhotoCheckRequest;
 import com.example.backend.attachment.entity.AttachmentOwner;
 import com.example.backend.attachment.service.AttachmentService;
 import com.example.backend.common.response.ApiResponse;
+import jakarta.validation.Valid;
 import org.springframework.core.io.FileSystemResource;
 import org.springframework.core.io.Resource;
 import org.springframework.http.ContentDisposition;
@@ -24,7 +26,9 @@ import java.util.List;
  *  - GET  /api/v1/attachments?ownerType=&ownerId=
  *  - POST /api/v1/tbm/{tbmId}/photos           (multipart: file)
  *  - GET  /api/v1/tbm/{tbmId}/photos
+ *  - POST /api/v1/tbm/{tbmId}/photos/check     TBM 사진 다시 확인 (TBM 날짜를 바꾼 뒤)
  *  - GET  /api/v1/attachments/{id}/file        내려받기 (현장 권한)
+ *  - PUT  /api/v1/attachments/{id}/check       TBM 사진 확인 결과 고치기 (작성자, 사유 필수)
  *  - DELETE /api/v1/attachments/{id}           잘못 올린 사진 지우기
  */
 @RestController
@@ -63,6 +67,11 @@ public class AttachmentController {
         return ApiResponse.ok(service.list(userId, AttachmentOwner.TBM, tbmId));
     }
 
+    @PostMapping("/tbm/{tbmId}/photos/check")
+    public ApiResponse<List<AttachmentResponse>> recheckTbmPhotos(@AuthenticationPrincipal Long userId, @PathVariable Long tbmId) {
+        return ApiResponse.ok(service.recheckTbmPhotos(userId, tbmId));
+    }
+
     @GetMapping("/attachments/{attachmentId}/file")
     public ResponseEntity<Resource> file(@AuthenticationPrincipal Long userId, @PathVariable Long attachmentId) {
         AttachmentService.FileDownload f = service.file(userId, attachmentId);
@@ -76,6 +85,12 @@ public class AttachmentController {
             res.contentLength(f.size());
         }
         return res.body(new FileSystemResource(f.path()));
+    }
+
+    @PutMapping("/attachments/{attachmentId}/check")
+    public ApiResponse<AttachmentResponse> correctCheck(@AuthenticationPrincipal Long userId, @PathVariable Long attachmentId,
+                                                        @Valid @RequestBody CorrectPhotoCheckRequest request) {
+        return ApiResponse.ok(service.correctTbmPhotoCheck(userId, attachmentId, request));
     }
 
     @DeleteMapping("/attachments/{attachmentId}")

@@ -1,8 +1,11 @@
 package com.example.backend.attachment.service;
 
 import com.example.backend.attachment.dto.AttachmentResponse;
+import com.example.backend.attachment.dto.CorrectPhotoCheckRequest;
 import com.example.backend.attachment.entity.AttachmentOwner;
+import com.example.backend.attachment.entity.PhotoCheckResult;
 import com.example.backend.attachment.repository.AttachmentRepository;
+import com.example.backend.attachment.repository.PhotoCheckRepository;
 import com.example.backend.common.exception.ErrorCode;
 import com.example.backend.site.entity.Site;
 import com.example.backend.site.entity.SiteMember;
@@ -62,6 +65,7 @@ class AttachmentDbTest {
 
     @Autowired AttachmentService service;
     @Autowired AttachmentRepository attachmentRepository;
+    @Autowired PhotoCheckRepository photoCheckRepository;
     @Autowired TbmRecordRepository tbmRepository;
     @Autowired UserRepository userRepository;
     @Autowired SiteRepository siteRepository;
@@ -115,6 +119,11 @@ class AttachmentDbTest {
         assertThat(a.createdAt()).isNotNull();
         assertThat(a.url()).isEqualTo("/api/v1/attachments/" + a.attachmentId() + "/file");
         assertThat(a.duplicateOfId()).isNull();
+        assertThat(a.check().result()).isEqualTo(PhotoCheckResult.PASS);   // 11/03 촬영 = TBM 날짜
+        assertThat(a.check().detectedDate()).isEqualTo(DAY);
+        assertThat(a.check().checkedTbmDate()).isEqualTo(DAY);
+        assertThat(a.check().model()).isEqualTo("RULE:v1");
+        assertThat(a.check().checkedAt()).isNotNull();
 
         String stored = attachmentRepository.findById(a.attachmentId()).orElseThrow().getStoredPath();
         assertThat(stored).matches("attachments/" + siteId + "/\\d{4}/\\d{2}/[0-9a-f-]{36}\\.jpg");
@@ -123,6 +132,8 @@ class AttachmentDbTest {
         // 같은 파일을 다시 올리면 저장은 되고 앞 첨부를 알려 준다
         AttachmentResponse again = service.upload(writer, AttachmentOwner.TBM, tbmId, file("다시.jpg", jpeg));
         assertThat(again.duplicateOfId()).isEqualTo(a.attachmentId());
+        assertThat(again.check().result()).isEqualTo(PhotoCheckResult.FAIL);   // 같은 TBM 에 똑같은 사진
+        assertThat(again.check().duplicateOfId()).isEqualTo(a.attachmentId());
 
         expectCode(() -> service.upload(writer, AttachmentOwner.TBM, tbmId, file("a.txt", "hello world text".getBytes())),
                 ErrorCode.INVALID_REQUEST);
@@ -133,7 +144,8 @@ class AttachmentDbTest {
         expectCode(() -> service.upload(writer, AttachmentOwner.WORK, 1L, file("x.png", TestImages.png())), ErrorCode.INVALID_REQUEST);
         expectCode(() -> service.upload(writer, AttachmentOwner.TBM, 999_999_999L, file("x.png", TestImages.png())), ErrorCode.NOT_FOUND);
 
-        service.upload(writer, AttachmentOwner.TBM, tbmId, file("p.png", TestImages.png()));   // 3장째
+        AttachmentResponse png = service.upload(writer, AttachmentOwner.TBM, tbmId, file("p.png", TestImages.png()));   // 3장째
+        assertThat(png.check().result()).isEqualTo(PhotoCheckResult.UNSURE);   // 촬영 날짜 정보 없음
         expectCode(() -> service.upload(writer, AttachmentOwner.TBM, tbmId, file("h.heic", TestImages.heic())),
                 ErrorCode.INVALID_REQUEST);   // 기록당 3장 (테스트 설정)
 
@@ -155,6 +167,10 @@ class AttachmentDbTest {
         AttachmentResponse b = service.upload(writer, AttachmentOwner.TBM, tbmId, file("b.png", TestImages.heic()));
 
         expectCode(() -> service.delete(otherWriter, a.attachmentId()), ErrorCode.FORBIDDEN);
+        AttachmentResponse copy = service.upload(writer, AttachmentOwner.TBM, tbmId, file("a2.png", TestImages.png()));
+        expectCode(() -> service.delete(writer, a.attachmentId()), ErrorCode.INVALID_STATE);   // 뒤의 같은 사진이 가리킴
+        service.delete(writer, copy.attachmentId());   // 확인 결과가 있어도 작성 중이면 지움
+        assertThat(photoCheckRepository.findByAttachmentIdOrderByIdDesc(copy.attachmentId())).isEmpty();
         service.delete(writer, a.attachmentId());
         em.flush();
         assertThat(attachmentRepository.findById(a.attachmentId())).isEmpty();
@@ -168,5 +184,53 @@ class AttachmentDbTest {
         tbmRepository.saveAndFlush(tbm);
         expectCode(() -> service.upload(writer, AttachmentOwner.TBM, tbmId, file("d.png", TestImages.png())), ErrorCode.INVALID_STATE);
         expectCode(() -> service.delete(writer, c.attachmentId()), ErrorCode.INVALID_STATE);
+        expectCode(() -> service.recheckTbmPhotos(writer, tbmId), ErrorCode.INVALID_STATE);
+    }
+
+    @Test
+    @DisplayName("TBM 날짜를 바꾼 뒤 다시 확인: 행을 새로 더하고 최신 결과로 보여 줌")
+    void recheck() {
+        AttachmentResponse a = service.upload(writer, AttachmentOwner.TBM, tbmId,
+                file("a.jpg", TestImages.jpegWithExif("2026:11:03 08:10:00", true)));
+        assertThat(a.check().result()).isEqualTo(PhotoCheckResult.PASS);
+
+        TbmRecord tbm = tbmRepository.findById(tbmId).orElseThrow();
+        tbm.updateContent(null, null, DAY.plusDays(1), null, null, null);
+        tbmRepository.saveAndFlush(tbm);
+
+        AttachmentResponse after = service.recheckTbmPhotos(writer, tbmId).get(0);
+        assertThat(after.check().result()).isEqualTo(PhotoCheckResult.FAIL);
+        assertThat(after.check().checkedTbmDate()).isEqualTo(DAY.plusDays(1));
+        assertThat(photoCheckRepository.findByAttachmentIdOrderByIdDesc(a.attachmentId())).hasSize(2);
+        expectCode(() -> service.recheckTbmPhotos(stranger, tbmId), ErrorCode.SITE_NOT_ALLOWED);
+    }
+
+    @Test
+    @DisplayName("결과 고치기: TBM 작성자·현장 관리자만, 사유 남김, 날짜 정보 있는 사진은 당일 확인 못 함, 다시 확인해도 고친 값 유지")
+    void correct() {
+        AttachmentResponse png = service.upload(writer, AttachmentOwner.TBM, tbmId, file("kakao.png", TestImages.png()));
+        assertThat(png.check().result()).isEqualTo(PhotoCheckResult.UNSURE);
+
+        CorrectPhotoCheckRequest fix = new CorrectPhotoCheckRequest(6, 0, true, "카톡으로 받아 날짜 정보 없음, 6명 모두 안전모 착용");
+        expectCode(() -> service.correctTbmPhotoCheck(otherWriter, png.attachmentId(), fix), ErrorCode.FORBIDDEN);
+        AttachmentResponse fixed = service.correctTbmPhotoCheck(writer, png.attachmentId(), fix);
+        assertThat(fixed.check().result()).isEqualTo(PhotoCheckResult.PASS);
+        assertThat(fixed.check().detectedPeople()).isEqualTo(6);
+        assertThat(fixed.check().helmetMissing()).isZero();
+        assertThat(fixed.check().dateConfirmed()).isTrue();
+        assertThat(fixed.check().model()).isEqualTo("HUMAN");
+        assertThat(fixed.check().reason()).startsWith("카톡으로 받아");
+        assertThat(photoCheckRepository.findByAttachmentIdOrderByIdDesc(png.attachmentId())).hasSize(2);   // 앞 행 그대로
+
+        AttachmentResponse rechecked = service.recheckTbmPhotos(writer, tbmId).get(0);
+        assertThat(rechecked.check().result()).isEqualTo(PhotoCheckResult.PASS);
+        assertThat(rechecked.check().detectedPeople()).isEqualTo(6);
+
+        AttachmentResponse jpg = service.upload(writer, AttachmentOwner.TBM, tbmId,
+                file("a.jpg", TestImages.jpegWithExif("2026:11:03 08:10:00", true)));
+        expectCode(() -> service.correctTbmPhotoCheck(writer, jpg.attachmentId(), fix), ErrorCode.INVALID_REQUEST);
+        AttachmentResponse helmet = service.correctTbmPhotoCheck(adminId, jpg.attachmentId(),
+                new CorrectPhotoCheckRequest(5, 1, null, "뒤쪽 1명 안전모 없음"));
+        assertThat(helmet.check().result()).isEqualTo(PhotoCheckResult.FAIL);
     }
 }

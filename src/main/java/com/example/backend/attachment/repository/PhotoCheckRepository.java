@@ -12,4 +12,10 @@ public interface PhotoCheckRepository extends JpaRepository<PhotoCheck, Long> {
 
     /** 첨부의 최신 확인 결과 */
     Optional<PhotoCheck> findTopByAttachmentIdOrderByIdDesc(Long attachmentId);
+
+    /** 다른 사진의 확인 결과가 이 첨부를 "똑같은 파일"로 가리키는가 */
+    boolean existsByDuplicateOfAndAttachmentIdNot(Long duplicateOf, Long attachmentId);
+
+    /** 사진을 지울 때 그 사진의 확인 결과도 지운다 (작성 중인 기록만) */
+    void deleteByAttachmentId(Long attachmentId);
 }
