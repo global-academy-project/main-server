@@ -2,8 +2,10 @@ package com.example.backend.attachment.controller;
 
 import com.example.backend.attachment.dto.AttachmentResponse;
 import com.example.backend.attachment.dto.CorrectPhotoCheckRequest;
+import com.example.backend.attachment.dto.TbmPhotoSummaryResponse;
 import com.example.backend.attachment.entity.AttachmentOwner;
 import com.example.backend.attachment.service.AttachmentService;
+import com.example.backend.attachment.service.TbmPhotoUploadService;
 import com.example.backend.common.response.ApiResponse;
 import jakarta.validation.Valid;
 import org.springframework.core.io.FileSystemResource;
@@ -27,6 +29,8 @@ import java.util.List;
  *  - POST /api/v1/tbm/{tbmId}/photos           (multipart: file)
  *  - GET  /api/v1/tbm/{tbmId}/photos
  *  - POST /api/v1/tbm/{tbmId}/photos/check     TBM 사진 다시 확인 (TBM 날짜를 바꾼 뒤)
+ *  - GET  /api/v1/tbm/{tbmId}/photos/summary   사진 속 인원과 참석자 명부 비교
+ * TBM 사진은 올릴 때 파일 정보 확인 + 사진 인식(app.photo.vision.client)을 한다.
  *  - GET  /api/v1/attachments/{id}/file        내려받기 (현장 권한)
  *  - PUT  /api/v1/attachments/{id}/check       TBM 사진 확인 결과 고치기 (작성자, 사유 필수)
  *  - DELETE /api/v1/attachments/{id}           잘못 올린 사진 지우기
@@ -36,9 +40,11 @@ import java.util.List;
 public class AttachmentController {
 
     private final AttachmentService service;
+    private final TbmPhotoUploadService uploadService;
 
-    public AttachmentController(AttachmentService service) {
+    public AttachmentController(AttachmentService service, TbmPhotoUploadService uploadService) {
         this.service = service;
+        this.uploadService = uploadService;
     }
 
     @PostMapping(value = "/attachments", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
@@ -46,7 +52,7 @@ public class AttachmentController {
     public ApiResponse<AttachmentResponse> upload(@AuthenticationPrincipal Long userId,
                                                   @RequestParam AttachmentOwner ownerType, @RequestParam Long ownerId,
                                                   @RequestParam(value = "file", required = false) MultipartFile file) {
-        return ApiResponse.ok(service.upload(userId, ownerType, ownerId, file));
+        return ApiResponse.ok(uploadService.upload(userId, ownerType, ownerId, file));
     }
 
     @GetMapping("/attachments")
@@ -59,7 +65,7 @@ public class AttachmentController {
     @ResponseStatus(HttpStatus.CREATED)
     public ApiResponse<AttachmentResponse> uploadTbmPhoto(@AuthenticationPrincipal Long userId, @PathVariable Long tbmId,
                                                           @RequestParam(value = "file", required = false) MultipartFile file) {
-        return ApiResponse.ok(service.upload(userId, AttachmentOwner.TBM, tbmId, file));
+        return ApiResponse.ok(uploadService.upload(userId, AttachmentOwner.TBM, tbmId, file));
     }
 
     @GetMapping("/tbm/{tbmId}/photos")
@@ -70,6 +76,11 @@ public class AttachmentController {
     @PostMapping("/tbm/{tbmId}/photos/check")
     public ApiResponse<List<AttachmentResponse>> recheckTbmPhotos(@AuthenticationPrincipal Long userId, @PathVariable Long tbmId) {
         return ApiResponse.ok(service.recheckTbmPhotos(userId, tbmId));
+    }
+
+    @GetMapping("/tbm/{tbmId}/photos/summary")
+    public ApiResponse<TbmPhotoSummaryResponse> tbmPhotoSummary(@AuthenticationPrincipal Long userId, @PathVariable Long tbmId) {
+        return ApiResponse.ok(service.tbmPhotoSummary(userId, tbmId));
     }
 
     @GetMapping("/attachments/{attachmentId}/file")

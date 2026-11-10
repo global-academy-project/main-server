@@ -15,9 +15,13 @@ import java.util.List;
  *  - duplicateOfId: 똑같은 파일인 이전 첨부, messages: 화면에 그대로 보여 줄 안내
  *  - model: 확인한 방법 (RULE:v1 = 파일 정보만, HUMAN = 작성자가 고침), reason: 작성자가 고친 사유
  *  - checkedTbmDate: 확인할 때의 TBM 날짜 (지금 날짜와 다르면 다시 확인 필요)
+ *  - boxes: 인식 모델이 찾은 위치 (label person | helmet | no_helmet, x·y·w·h 는 사진에 대한 0~1 비율). 인식 전이면 빈 목록
  */
 public record PhotoCheckView(Long checkId, PhotoCheckType checkType, PhotoCheckResult result, LocalDate detectedDate,
                              Integer detectedPeople, Integer helmetMissing, boolean dateConfirmed, Long duplicateOfId,
                              List<String> messages, String model, String reason, LocalDate checkedTbmDate,
-                             LocalDateTime checkedAt) {
+                             LocalDateTime checkedAt, List<Box> boxes) {
+
+    public record Box(String label, Double score, double x, double y, double w, double h) {
+    }
 }

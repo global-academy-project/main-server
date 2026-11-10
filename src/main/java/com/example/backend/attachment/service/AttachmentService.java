@@ -2,6 +2,9 @@ package com.example.backend.attachment.service;
 
 import com.example.backend.attachment.dto.AttachmentResponse;
 import com.example.backend.attachment.dto.CorrectPhotoCheckRequest;
+import com.example.backend.attachment.dto.PhotoCheckView;
+import com.example.backend.attachment.dto.TbmPhotoSummaryResponse;
+import com.example.backend.attachment.vision.PhotoVision;
 import com.example.backend.attachment.entity.Attachment;
 import com.example.backend.attachment.entity.AttachmentKind;
 import com.example.backend.attachment.entity.AttachmentOwner;
@@ -15,6 +18,7 @@ import com.example.backend.history.entity.RecordHistory;
 import com.example.backend.history.repository.RecordHistoryRepository;
 import com.example.backend.site.service.SiteAccessService;
 import com.example.backend.site.service.SiteGuard;
+import com.example.backend.tbm.repository.TbmAttendeeRepository;
 import com.example.backend.tbm.repository.TbmRecordRepository;
 import com.example.backend.user.entity.User;
 import com.example.backend.user.repository.UserRepository;
@@ -61,6 +65,8 @@ public class AttachmentService {
     private final PhotoCheckRepository photoCheckRepository;
     private final TbmPhotoChecks tbmPhotoChecks;
     private final TbmRecordRepository tbmRepository;
+    private final TbmAttendeeRepository attendeeRepository;
+    private final int peopleTolerance;
     private final AttachmentOwners owners;
     private final FileStorage storage;
     private final RecordHistoryRepository historyRepository;
@@ -74,15 +80,19 @@ public class AttachmentService {
     private final int maxPerOwner;
 
     public AttachmentService(AttachmentRepository attachmentRepository, PhotoCheckRepository photoCheckRepository,
-                             TbmPhotoChecks tbmPhotoChecks, TbmRecordRepository tbmRepository, AttachmentOwners owners, FileStorage storage, RecordHistoryRepository historyRepository,
+                             TbmPhotoChecks tbmPhotoChecks, TbmRecordRepository tbmRepository,
+                             TbmAttendeeRepository attendeeRepository, AttachmentOwners owners, FileStorage storage, RecordHistoryRepository historyRepository,
                              UserRepository userRepository, SiteGuard siteGuard, SiteAccessService siteAccessService,
                              JsonMapper jsonMapper, EntityManager em, Clock clock,
                              @Value("${app.attachment.max-bytes}") long maxBytes,
-                             @Value("${app.attachment.max-per-owner}") int maxPerOwner) {
+                             @Value("${app.attachment.max-per-owner}") int maxPerOwner,
+                             @Value("${app.photo.people-tolerance:1}") int peopleTolerance) {
         this.attachmentRepository = attachmentRepository;
         this.photoCheckRepository = photoCheckRepository;
         this.tbmPhotoChecks = tbmPhotoChecks;
         this.tbmRepository = tbmRepository;
+        this.attendeeRepository = attendeeRepository;
+        this.peopleTolerance = peopleTolerance;
         this.owners = owners;
         this.storage = storage;
         this.historyRepository = historyRepository;
@@ -175,6 +185,31 @@ public class AttachmentService {
         }
         return new FileDownload(path, a.getMimeType() == null ? "application/octet-stream" : a.getMimeType(),
                 a.getOriginalName(), a.getFileSize() == null ? -1 : a.getFileSize());
+    }
+
+    /** 사진 인식 결과 반영 (TbmPhotoUploadService 가 인식을 마친 뒤 부른다. 작성자가 이미 고쳤으면 그대로) */
+    @Transactional
+    public AttachmentResponse applyVision(Long attachmentId, PhotoVision vision) {
+        Attachment a = attachmentRepository.findById(attachmentId)
+                .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND, "첨부를 찾을 수 없습니다."));
+        if (a.getOwnerType() == AttachmentOwner.TBM && owners.find(a.getOwnerType(), a.getOwnerId()).editable()) {
+            tbmPhotoChecks.applyVision(a, vision);
+        }
+        return response(a);
+    }
+
+    /** TBM 사진 인원 요약: 사진 중 가장 많이 잡힌 인원과 참석자 명부 인원 비교 (알림만) */
+    @Transactional(readOnly = true)
+    public TbmPhotoSummaryResponse tbmPhotoSummary(Long userId, Long tbmId) {
+        AttachmentOwners.Owner owner = owners.find(AttachmentOwner.TBM, tbmId);
+        siteGuard.requireAccess(userId, owner.siteId());
+        List<Attachment> photos = attachmentRepository.findByOwnerTypeAndOwnerIdOrderByIdAsc(AttachmentOwner.TBM, tbmId);
+        Integer max = photos.stream().map(p -> tbmPhotoChecks.latest(p.getId())).filter(java.util.Objects::nonNull)
+                .map(PhotoCheckView::detectedPeople).filter(java.util.Objects::nonNull).max(Integer::compare).orElse(null);
+        int roster = attendeeRepository.countByTbmId(tbmId);
+        TbmPhotoRules.PeopleDecision d = TbmPhotoRules.people(max, roster, peopleTolerance);
+        return new TbmPhotoSummaryResponse(photos.size(), max, roster, peopleTolerance, d.result(),
+                photos.isEmpty() ? "아직 사진이 없습니다. TBM 진행 사진을 올려 제출해 주세요." : d.message());
     }
 
     /**
