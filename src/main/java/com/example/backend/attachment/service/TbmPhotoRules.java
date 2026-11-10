@@ -95,6 +95,33 @@ public final class TbmPhotoRules {
         return new Decision(result, taken, duplicate == null ? null : duplicate.attachmentId(), List.copyOf(messages));
     }
 
+    /** TBM 전체 인원 비교 결과 (result 가 null 이면 비교하지 않음) */
+    public record PeopleDecision(PhotoCheckResult result, String message) {
+    }
+
+    /**
+     * 사진 속 인원(사진 중 가장 많은 값)과 참석자 명부 인원 비교. 알리기만 한다.
+     * 명부보다 tolerance 명까지 적으면 통과 (촬영자 등), 더 적거나 명부보다 많으면 UNSURE.
+     */
+    public static PeopleDecision people(Integer maxPeople, int roster, int tolerance) {
+        if (maxPeople == null) {
+            return new PeopleDecision(null, "사진 속 인원을 아직 모릅니다. 사진의 \"결과 고치기\"로 적을 수 있습니다.");
+        }
+        if (roster == 0) {
+            return new PeopleDecision(null, "참석자 명부가 비어 있어 사진 속 인원(" + maxPeople + "명)과 비교하지 않았습니다.");
+        }
+        if (maxPeople > roster) {
+            return new PeopleDecision(PhotoCheckResult.UNSURE, "사진 속 인원(" + maxPeople + "명)이 참석자 명부(" + roster
+                    + "명)보다 많습니다. 참석자 등록이 빠졌는지 확인하세요.");
+        }
+        if (maxPeople < roster - tolerance) {
+            return new PeopleDecision(PhotoCheckResult.UNSURE, "사진 속 인원(" + maxPeople + "명)이 참석자 명부(" + roster
+                    + "명)보다 적습니다. 빠진 사람이 있는지 확인하세요.");
+        }
+        return new PeopleDecision(PhotoCheckResult.PASS, "사진 속 인원 " + maxPeople + "명 · 참석자 명부 " + roster + "명"
+                + (maxPeople < roster ? " (촬영자 등 " + tolerance + "명까지 차이는 통과)." : "."));
+    }
+
     private static String label(AttachmentOwner type) {
         return switch (type) {
             case TBM -> "TBM";

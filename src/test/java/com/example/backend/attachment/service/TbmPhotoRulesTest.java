@@ -66,4 +66,15 @@ class TbmPhotoRulesTest {
         TbmPhotoRules.Decision moved = TbmPhotoRules.check(10L, DAY.plusDays(1), null, null, new TbmPhotoRules.Observations(5, 0, DAY));
         assertThat(moved.result()).isEqualTo(PhotoCheckResult.UNSURE);
     }
+
+    @Test
+    @DisplayName("인원 비교: 명부보다 1명까지 적으면 통과, 더 적거나 많으면 UNSURE, 모르거나 명부가 비면 비교 안 함")
+    void people() {
+        assertThat(TbmPhotoRules.people(6, 6, 1).result()).isEqualTo(PhotoCheckResult.PASS);
+        assertThat(TbmPhotoRules.people(5, 6, 1).result()).isEqualTo(PhotoCheckResult.PASS);
+        assertThat(TbmPhotoRules.people(4, 6, 1).result()).isEqualTo(PhotoCheckResult.UNSURE);
+        assertThat(TbmPhotoRules.people(7, 6, 1).message()).contains("명부(6명)보다 많습니다");
+        assertThat(TbmPhotoRules.people(null, 6, 1).result()).isNull();
+        assertThat(TbmPhotoRules.people(3, 0, 1).result()).isNull();
+    }
 }

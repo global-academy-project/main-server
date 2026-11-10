@@ -2,6 +2,8 @@ package com.example.backend.attachment.service;
 
 import com.example.backend.attachment.dto.AttachmentResponse;
 import com.example.backend.attachment.dto.CorrectPhotoCheckRequest;
+import com.example.backend.attachment.dto.TbmPhotoSummaryResponse;
+import com.example.backend.attachment.vision.PhotoVision;
 import com.example.backend.attachment.entity.AttachmentOwner;
 import com.example.backend.attachment.entity.PhotoCheckResult;
 import com.example.backend.attachment.repository.AttachmentRepository;
@@ -35,6 +37,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.util.List;
 import java.util.UUID;
 
 import static com.example.backend.support.TestFixtures.expectCode;
@@ -232,5 +235,30 @@ class AttachmentDbTest {
         AttachmentResponse helmet = service.correctTbmPhotoCheck(adminId, jpg.attachmentId(),
                 new CorrectPhotoCheckRequest(5, 1, null, "뒤쪽 1명 안전모 없음"));
         assertThat(helmet.check().result()).isEqualTo(PhotoCheckResult.FAIL);
+    }
+
+    @Test
+    @DisplayName("사진 인식 반영: 인원·위치를 남기고, 작성자가 고친 사진은 덮지 않음, 인원 요약")
+    void vision() {
+        AttachmentResponse a = service.upload(writer, AttachmentOwner.TBM, tbmId,
+                file("a.jpg", TestImages.jpegWithExif("2026:11:03 08:10:00", true)));
+        PhotoVision v = new PhotoVision("YOLOX-Nano", 4, null,
+                List.of(new PhotoVision.Box("person", 0.9, 0.1, 0.2, 0.2, 0.6), new PhotoVision.Box("person", 0.8, 0.5, 0.2, 1.4, 0.6)));
+        AttachmentResponse seen = service.applyVision(a.attachmentId(), v);
+        assertThat(seen.check().model()).isEqualTo("YOLOX-Nano");
+        assertThat(seen.check().detectedPeople()).isEqualTo(4);
+        assertThat(seen.check().result()).isEqualTo(PhotoCheckResult.PASS);
+        assertThat(seen.check().boxes()).hasSize(1);   // 0~1 밖 위치는 버림
+
+        TbmPhotoSummaryResponse summary = service.tbmPhotoSummary(writer, tbmId);
+        assertThat(summary.maxPeople()).isEqualTo(4);
+        assertThat(summary.rosterCount()).isZero();
+        assertThat(summary.result()).isNull();   // 명부가 비어 비교 안 함
+
+        service.correctTbmPhotoCheck(writer, a.attachmentId(), new CorrectPhotoCheckRequest(5, 0, null, "뒤쪽 1명 가려짐"));
+        AttachmentResponse kept = service.applyVision(a.attachmentId(), v);
+        assertThat(kept.check().model()).isEqualTo("HUMAN");
+        assertThat(kept.check().detectedPeople()).isEqualTo(5);
+        assertThat(kept.check().boxes()).hasSize(1);   // 고친 행에도 위치는 이어 둠
     }
 }

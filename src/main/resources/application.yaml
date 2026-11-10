@@ -85,6 +85,11 @@ app:
   attachment:
     max-bytes: 20971520             # 사진 한 장 최대 크기 (20MB, spring.servlet.multipart.max-file-size 와 같게)
     max-per-owner: 20               # 기록 하나에 붙일 수 있는 사진 장수
+  photo:
+    vision:
+      client: ${APP_PHOTO_VISION_CLIENT:none}   # none(인식 안 함, 기본) | mock(고정 값, 화면 확인용) | fastapi(ai-model 사진 인식, 로컬 모델)
+      timeout-seconds: ${APP_PHOTO_VISION_TIMEOUT_SECONDS:20}   # 인식 응답 대기. 넘으면 파일 정보 확인 결과만 남긴다
+    people-tolerance: 1             # 사진 속 인원이 참석자 명부보다 이만큼 적어도 통과 (촬영자 등)
   kb-ingest:
     # 아차사고 RAG 적재 (A kb-ingest POST /ingest/chunks). none(기본, 적재 안 함) | http
     client: ${APP_KB_INGEST_CLIENT:none}
