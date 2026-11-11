@@ -211,4 +211,61 @@ class LlmExtractionVerifierTest {
         assertThat(value(r, MeasurementItem.O2).value()).isEqualByComparingTo("20.9");
         assertThat(value(r, MeasurementItem.CO2)).isNull();
     }
+
+    @Test
+    @DisplayName("영문 약어 안의 숫자는 값이 아니다 (CO2=2% 의 2 는 = 뒤의 2)")
+    void numberInsideAbbreviation() {
+        RuleInputExtractor.Result r = verify("CO2=2프로, H2S: 3피피엠", llm(m("CO2", "2", "PCT", "CO2=2프로"), m("H2S", "3", "PPM", "H2S: 3피피엠")));
+
+        assertThat(value(r, MeasurementItem.CO2).value()).isEqualByComparingTo("2");
+        assertThat(value(r, MeasurementItem.H2S).value()).isEqualByComparingTo("3");
+        assertThat(LlmExtractionVerifier.containsNumber("H2S 3ppm", new BigDecimal("2"))).isFalse();
+    }
+
+    @Test
+    @DisplayName("어순: 값이 이름보다 먼저인 조각이 끊는 기호로 이어지면 뒤 이름으로 본다")
+    void valueBeforeName() {
+        RuleInputExtractor.Result r = verify("19% 산소 / 9%LEL 가연성가스", llm(
+                m("O2", "19", "PCT", "19% 산소"), m("LEL", "9", "PCT_LEL", "9%LEL 가연성가스")));
+        assertThat(value(r, MeasurementItem.O2).value()).isEqualByComparingTo("19");
+        assertThat(value(r, MeasurementItem.LEL).value()).isEqualByComparingTo("9");
+
+        RuleInputExtractor.Result r2 = verify("20.8% 산소, 0ppm 황화수소", llm(
+                m("O2", "20.8", "PCT", "20.8% 산소"), m("H2S", "0", "PPM", "0ppm 황화수소")));
+        assertThat(value(r2, MeasurementItem.H2S).value()).isEqualByComparingTo("0");
+    }
+
+    @Test
+    @DisplayName("어순: 뒤 이름이 자기 값을 가지면 쓰지 않는다 (산소, 20.9% 황화수소 3ppm 의 20.9 는 산소)")
+    void followingNameWithOwnValue() {
+        String text = "산소, 20.9% 황화수소 3ppm";
+        RuleInputExtractor.Result ok = verify(text, llm(m("O2", "20.9", "PCT", "20.9%"), m("H2S", "3", "PPM", "황화수소 3ppm")));
+        assertThat(value(ok, MeasurementItem.O2).value()).isEqualByComparingTo("20.9");
+
+        RuleInputExtractor.Result wrong = verify(text, llm(m("H2S", "20.9", "PCT", "20.9%")));
+        assertThat(wrong.measurements()).isEmpty();   // 20.9 를 황화수소로 받아들이지 않는다
+        assertThat(wrong.notes()).anyMatch(n -> n.startsWith("H2S: 값 20.9은(는) 문장에서 O2 값이라"));
+
+        RuleInputExtractor.Result plain = verify("산소 20.9%황화수소 3ppm", llm(m("O2", "20.9", "PCT", "산소 20.9%")));
+        assertThat(value(plain, MeasurementItem.O2).value()).isEqualByComparingTo("20.9");   // 끊는 기호 없음 → 앞 이름
+    }
+
+    @Test
+    @DisplayName("어순: 앞 이름과 사이에 숫자가 있으면 재측정 값으로 보고 앞 이름 그대로 (값 두 번 → 하나만 적어 주세요)")
+    void remeasureAfterComma() {
+        RuleInputExtractor.Result r = verify("산소 16.9 %, 재측정 23퍼센트. 일산화탄소 측정값 2ppm", llm(
+                m("O2", "16.9", "PCT", "산소 16.9 %"), m("O2", "23", "PCT", "재측정 23퍼센트"), m("CO", "2", "PPM", "일산화탄소 측정값 2ppm")));
+
+        assertThat(value(r, MeasurementItem.O2)).isNull();   // 16.9 하나만 남아 그대로 들어가면 안 된다
+        assertThat(r.notes()).anyMatch(n -> n.startsWith("O2: 값이 둘 이상입니다 (16.9, 23)"));
+        assertThat(value(r, MeasurementItem.CO).value()).isEqualByComparingTo("2");
+    }
+
+    @Test
+    @DisplayName("어순: 뒤 이름이 자기 조각 안에 값을 가지면 쓰지 않는다 (산소, 20.9%. 이산화탄소 측정값 0.5%)")
+    void followingNameWithValueLater() {
+        RuleInputExtractor.Result r = verify("산소, 20.9%. 이산화탄소 측정값 0.5%", llm(m("CO2", "20.9", "PCT", "20.9%")));
+
+        assertThat(r.measurements()).isEmpty();
+    }
 }

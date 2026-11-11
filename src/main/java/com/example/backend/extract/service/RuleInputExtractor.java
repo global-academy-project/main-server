@@ -84,19 +84,38 @@ public class RuleInputExtractor {
      * 원문 t 의 [numStart, numEnd) 숫자가 어느 측정 항목의 값인지 (LLM 추출값 확인용, LlmExtractionVerifier).
      * 숫자 바로 앞의 항목 이름(사전 names) → 앞에 없으면 바로 뒤의 이름. 이름이 하나도 없으면 null.
      * 이름 찾기는 사전 추출과 같다 (긴 이름 먼저, 영문은 앞뒤 경계 → "CO2" 안의 "CO" 는 일산화탄소로 보지 않음).
+     * 어순 (11/11): 앞 이름과 숫자 사이에 끊는 기호(, / . ;)만 있고 다른 숫자가 없으면, 앞 이름은 다른 조각의 이름으로 보고
+     * 뒤 이름을 쓴다 ("19% 산소 / 9%LEL 가연성가스" 의 9 → 가연성가스).
+     * 앞 이름과 사이에 숫자가 있으면 재측정 값으로 보고 앞 이름 그대로 ("산소 16.9%, 재측정 23%" 의 23 → 산소, Spring 이 "하나만").
+     * 뒤 이름이 자기 조각(다음 끊는 기호까지) 안에 숫자를 가지면("일산화탄소 측정값 2ppm") 쓰지 않는다.
      */
     public MeasurementItem itemAt(String t, int numStart, int numEnd) {
+        String text = t == null ? "" : t;
         Span before = null;
         Span after = null;
-        for (Span s : spans(t == null ? "" : t)) {
+        for (Span s : spans(text)) {
             if (s.end() <= numStart) {
                 before = s;
             } else if (s.start() >= numEnd && after == null) {
                 after = s;
             }
         }
-        Span pick = before != null ? before : after;
+        String between = before == null ? "" : text.substring(before.end(), numStart);
+        boolean cut = before != null && BREAK.matcher(between).find() && !DIGIT.matcher(between).find();
+        boolean afterFree = after != null && !DIGIT.matcher(fragment(text, after.end())).find();
+        Span pick = before == null ? after : (cut && afterFree ? after : before);
         return pick == null ? null : MeasurementItem.valueOf(pick.name().m().item());
+    }
+
+    /** 조각을 끊는 기호 (소수점은 이름과 숫자 사이에 오지 않으므로 . 도 끊는 기호로 본다) */
+    private static final Pattern BREAK = Pattern.compile("[,/.;·]");
+    private static final Pattern DIGIT = Pattern.compile("\\d");
+
+    /** from 부터 다음 끊는 기호(또는 끝)까지 */
+    private static String fragment(String text, int from) {
+        Matcher m = BREAK.matcher(text);
+        int end = m.find(from) ? m.start() : text.length();
+        return text.substring(from, end);
     }
 
     public Result extract(String text, List<ZoneRef> zones) {
