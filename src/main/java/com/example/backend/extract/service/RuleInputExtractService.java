@@ -75,7 +75,7 @@ public class RuleInputExtractService {
         }
         var llm = llmClient.extract(ruleResult.text(), LLM_ITEMS, LLM_WORK_TYPES);
         if (llm.isPresent()) {
-            return new Extraction(LlmExtractionVerifier.verify(ruleResult, llm.get(), extractor::measurementRule), llmClient.name());
+            return new Extraction(LlmExtractionVerifier.verify(ruleResult, llm.get(), extractor::measurementRule, extractor::itemAt), llmClient.name());
         }
         List<String> notes = new ArrayList<>(ruleResult.notes());
         notes.add("LLM 추출을 쓰지 못해 사전(규칙) 추출 결과만 보여 줍니다.");
