@@ -202,7 +202,7 @@ public class RuleInputExtractor {
             values.forEach(v -> distinct.add(v.value().stripTrailingZeros()));
             if (distinct.size() > 1) {
                 notes.add(item + ": 값이 둘 이상입니다 (" + String.join(", ", distinct.stream().map(BigDecimal::toPlainString).toList())
-                        + "). 비워 둡니다.");
+                        + "). 하나만 적어 주세요.");
             } else {
                 out.add(values.get(0));
             }
@@ -270,7 +270,7 @@ public class RuleInputExtractor {
         return 0;
     }
 
-    private static String unitLabel(String code) {
+    static String unitLabel(String code) {   // LlmExtractionVerifier 도 같은 표기로 안내한다
         return switch (code) {
             case "PCT" -> "%";
             case "PPM" -> "ppm";
