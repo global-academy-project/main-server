@@ -40,6 +40,7 @@ public class RuleInputExtractService {
     private final WorkZoneRepository zoneRepository;
     private final SiteGuard siteGuard;
     private final LlmExtractClient llmClient;
+    private final LlmExtractCache llmCache;
 
     /** LLM 에 물어볼 측정 항목·작업 종류 (ai-model 요청 measurementItems·workTypes, 일반 작업은 제외) */
     static final List<String> LLM_ITEMS = Arrays.stream(MeasurementItem.values()).map(Enum::name).toList();
@@ -47,7 +48,7 @@ public class RuleInputExtractService {
 
     public RuleInputExtractService(@Value("${app.extract.dictionary}") Resource dictionary, JsonMapper jsonMapper,
                                    RuleCheckService ruleCheckService, WorkZoneRepository zoneRepository,
-                                   SiteGuard siteGuard, LlmExtractClient llmClient) throws IOException {
+                                   SiteGuard siteGuard, LlmExtractClient llmClient, LlmExtractCache llmCache) throws IOException {
         try (InputStream in = dictionary.getInputStream()) {
             this.extractor = new RuleInputExtractor(jsonMapper.readValue(in, ExtractDictionary.class));
         }
@@ -55,6 +56,7 @@ public class RuleInputExtractService {
         this.zoneRepository = zoneRepository;
         this.siteGuard = siteGuard;
         this.llmClient = llmClient;
+        this.llmCache = llmCache;
     }
 
     /** 추출 결과와 쓴 추출기 이름 (응답 extractor, 허가서 스냅샷 _source.extractor) */
@@ -64,8 +66,17 @@ public class RuleInputExtractService {
     /**
      * 문장 → 추출 (위 순서). 미리 보기와 허가서 반영이 같은 결과를 쓰도록 한 곳에 둔다.
      * LLM 호출이 있을 수 있으니(최대 app.extract.llm.timeout-seconds) 쓰기 트랜잭션 안에서 부르지 않는다.
+     * 미리 보기용: LLM 응답을 기억해 두고(LlmExtractCache), 기억한 응답이 실패면 다시 부른다.
      */
     public Extraction run(String text, Long siteId) {
+        return run(text, siteId, true);
+    }
+
+    /**
+     * @param retryLlmFailure true(미리 보기): 기억한 LLM 응답이 실패면 다시 부른다.
+     *                        false(허가서 반영): 미리 보기 때 받은 응답을 성공·실패 그대로 써서 사용자가 본 결과와 같게 기록한다
+     */
+    public Extraction run(String text, Long siteId, boolean retryLlmFailure) {
         List<RuleInputExtractor.ZoneRef> zones = zoneRepository.findBySiteIdAndActiveTrueOrderByCodeAsc(siteId).stream()
                 .map(z -> new RuleInputExtractor.ZoneRef(z.getId(), z.getCode(), z.getName())).toList();
         RuleInputExtractor.Result ruleResult = extractor.extract(text, zones);
@@ -73,7 +84,8 @@ public class RuleInputExtractService {
         if (llmClient.name() == null) {
             return new Extraction(ruleResult, rule);
         }
-        var llm = llmClient.extract(ruleResult.text(), LLM_ITEMS, LLM_WORK_TYPES);
+        var llm = llmCache.get(ruleResult.text(), retryLlmFailure,
+                () -> llmClient.extract(ruleResult.text(), LLM_ITEMS, LLM_WORK_TYPES));
         if (llm.isPresent()) {
             return new Extraction(LlmExtractionVerifier.verify(ruleResult, llm.get(), extractor::measurementRule, extractor::itemAt), llmClient.name());
         }

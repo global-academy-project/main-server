@@ -66,12 +66,15 @@ public class ExtractApplyService {
         this.clock = clock;
     }
 
-    /** 반영 전에 서버 추출을 다시 한다 (미리 보기와 같은 순서, 트랜잭션 밖). 권한 확인 포함 */
+    /**
+     * 반영 전에 서버 추출을 다시 한다 (미리 보기와 같은 순서, 트랜잭션 밖). 권한 확인 포함.
+     * LLM 은 미리 보기 때 받은 응답을 그대로 쓴다 (LlmExtractCache, 실패였으면 실패 그대로) → LLM 을 두 번 부르지 않는다
+     */
     public RuleInputExtractService.Extraction extractFor(Long userId, Long permitId, String text) {
         Permit permit = permitRepository.findById(permitId)
                 .orElseThrow(() -> new BusinessException(ErrorCode.PERMIT_NOT_FOUND));
         siteGuard.requireAccess(userId, permit.getSiteId());
-        return extractService.run(text, permit.getSiteId());
+        return extractService.run(text, permit.getSiteId(), false);
     }
 
     @Transactional
