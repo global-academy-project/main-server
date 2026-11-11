@@ -21,11 +21,14 @@ import java.util.regex.Pattern;
  * 서버는 그 값을 확인만 한 뒤 규칙 엔진으로 넘긴다. 사전(규칙) 추출 값은 섞지 않는다.
  * <ul>
  *   <li>측정값: 근거 문구가 원문에 그대로 있고 그 안에 값 숫자가 있어야 한다 (지어낸 값 차단)</li>
+ *   <li>단위는 LLM 이 준 값이 아니라 원문에서 숫자 바로 뒤에 적힌 표기로 본다 (11/11, 사전 추출과 같은 기준).
+ *       적힌 단위가 없으면 항목 단위로 채우고 "단위가 없어 ~로 봤습니다" 를 남긴다 (현장에서 숫자만 치는 경우가 많고,
+ *       항목마다 단위가 하나라 정해진다. 사용자가 확인한 뒤에 들어간다). 다른 단위가 적혀 있으면 비운다</li>
  *   <li>그 숫자가 원문에서 그 항목 이름 뒤(앞에 없으면 앞)에 있어야 한다. "산소 20.9%" 를 CO2 로 읽으면 버림.
  *       숫자 앞뒤에 항목 이름이 하나도 없으면 막지 않는다 (사전 추출도 이름 없는 숫자는 못 잡으므로)</li>
- *   <li>단위가 그 항목이 받는 단위(사전 units)이고, 근거 문구에 적힌 단위와도 맞아야 한다 ("황화수소 5%"를 ppm 으로 읽으면 버림)</li>
+ *   <li>원문에 적힌 단위가 그 항목이 받는 단위(사전 units)여야 한다 ("황화수소 5%" 는 버림)</li>
  *   <li>값이 0 이상 사전 max 이하여야 한다</li>
- *   <li>같은 항목에 값이 둘 이상이면 비운다</li>
+ *   <li>같은 항목에 값이 둘 이상이면 비우고 "하나만 적어 주세요" 를 남긴다 (어느 항목인지 알 수 있게 LLM 은 둘 다 뽑는다)</li>
  *   <li>작업 종류: 근거 문구가 원문에 있을 때만</li>
  *   <li>감시자: 이름(2~20자)이 원문에 그대로 있을 때만</li>
  *   <li>구역: LLM 에 묻지 않는다. 현장 구역 코드·이름 대조(사전 추출의 구역 결과)를 그대로 쓴다</li>
@@ -82,8 +85,13 @@ public final class LlmExtractionVerifier {
             if (rule == null) {
                 continue;
             }
-            if (m.unit() == null || !rule.units().contains(m.unit()) || unitConflicts(evidence, m.unit())) {
-                notes.add(item + ": 단위(" + m.unit() + ")가 이 항목 단위가 아니라 비워 둡니다 (\"" + evidence + "\").");
+            String written = unitAfter(text, base + at[1]);
+            if (written == null) {
+                notes.add(item + ": 단위가 없어 " + RuleInputExtractor.unitLabel(item.unit()) + "(으)로 봤습니다. 확인해 주세요 (\""
+                        + evidence + "\").");
+            } else if (!rule.units().contains(written)) {
+                notes.add(item + ": 단위가 " + RuleInputExtractor.unitLabel(written) + "(으)로 왔습니다. 기준 단위는 "
+                        + RuleInputExtractor.unitLabel(item.unit()) + "라서 비워 둡니다 (\"" + evidence + "\").");
                 continue;
             }
             if (m.value().signum() < 0 || m.value().compareTo(rule.max()) > 0) {
@@ -99,7 +107,7 @@ public final class LlmExtractionVerifier {
             values.forEach(v -> distinct.add(v.value().stripTrailingZeros()));
             if (distinct.size() > 1) {
                 notes.add(item + ": 값이 둘 이상입니다 (" + String.join(", ", distinct.stream().map(BigDecimal::toPlainString).toList())
-                        + "). 비워 둡니다.");
+                        + "). 하나만 적어 주세요.");
             } else {
                 measurements.add(values.get(0));
             }
@@ -133,13 +141,22 @@ public final class LlmExtractionVerifier {
                 List.copyOf(measurements), form, notes);
     }
 
-    /** 근거 문구에 적힌 단위가 LLM 이 준 단위와 다른가 (% ↔ ppm) */
-    static boolean unitConflicts(String evidence, String unit) {
-        String e = evidence.toLowerCase(java.util.Locale.ROOT);
-        boolean saysPpm = e.contains("ppm") || e.contains("피피엠");
-        boolean saysPct = e.contains("%") || e.contains("퍼센트") || e.contains("프로");
-        return ("PPM".equals(unit) && saysPct && !saysPpm) || (!"PPM".equals(unit) && saysPpm && !saysPct);
+    /** 원문에서 숫자 바로 뒤(공백 건너뜀)에 적힌 단위 코드. 없으면 null. 긴 표기부터 본다 ("5% LEL" 은 %LEL) */
+    static String unitAfter(String text, int numEnd) {
+        String rest = text.substring(Math.min(numEnd, text.length())).stripLeading().toLowerCase(java.util.Locale.ROOT);
+        for (Map.Entry<String, String> w : UNIT_WORDS) {
+            if (rest.startsWith(w.getKey())) {
+                return w.getValue();
+            }
+        }
+        return null;
     }
+
+    /** 단위 표기 → 단위 코드 (사전 units 와 같은 표기, 긴 표기부터) */
+    private static final List<Map.Entry<String, String>> UNIT_WORDS = List.of(
+            Map.entry("%lel", "PCT_LEL"), Map.entry("% lel", "PCT_LEL"), Map.entry("lel%", "PCT_LEL"),
+            Map.entry("퍼센트", "PCT"), Map.entry("피피엠", "PPM"), Map.entry("ppm", "PPM"),
+            Map.entry("프로", "PCT"), Map.entry("%", "PCT"));
 
     /** 근거 문구 안에 값 숫자가 그대로 있나 (17.5 ↔ "17.5", 18 ↔ "18" 또는 "18.0") */
     static boolean containsNumber(String evidence, BigDecimal value) {

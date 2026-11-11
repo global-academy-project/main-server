@@ -91,14 +91,39 @@ class LlmExtractionVerifierTest {
     }
 
     @Test
-    @DisplayName("단위: 항목 단위가 아니거나 문장 단위와 다르면 버림 (황화수소 5% 를 ppm 으로 읽은 경우)")
+    @DisplayName("단위: 원문에 다른 단위가 적혀 있으면 버리고, 단위가 없으면 항목 단위로 채우고 알린다 (LLM 이 준 단위는 보지 않음)")
     void units() {
         RuleInputExtractor.Result r = verify("황화수소 5% 나옴, 산소 20.9", llm(
                 m("H2S", "5", "PPM", "황화수소 5%"), m("O2", "20.9", "PPM", "산소 20.9")));
 
-        assertThat(r.measurements()).isEmpty();
-        assertThat(r.notes()).anyMatch(n -> n.startsWith("H2S: 단위(PPM)")).anyMatch(n -> n.startsWith("O2: 단위(PPM)"));
-        assertThat(LlmExtractionVerifier.unitConflicts("가연성 가스 0%", "PCT_LEL")).isFalse();
+        assertThat(value(r, MeasurementItem.H2S)).isNull();
+        assertThat(value(r, MeasurementItem.O2).value()).isEqualByComparingTo("20.9");
+        assertThat(value(r, MeasurementItem.O2).unit()).isEqualTo("PCT");
+        assertThat(r.notes()).anyMatch(n -> n.startsWith("H2S: 단위가 %(으)로 왔습니다. 기준 단위는 ppm라서 비워 둡니다"))
+                .anyMatch(n -> n.startsWith("O2: 단위가 없어 %(으)로 봤습니다. 확인해 주세요"));
+    }
+
+    @Test
+    @DisplayName("단위 없이 숫자만 친 값 (현장에서 흔함): LLM 이 단위를 비워도 항목 단위로 채운다")
+    void numberOnly() {
+        RuleInputExtractor.Result r = verify("산소 19.5 황화수소 3 가연성가스 4", llm(
+                m("O2", "19.5", null, "산소 19.5"), m("H2S", "3", null, "황화수소 3"), m("LEL", "4", null, "가연성가스 4")));
+
+        assertThat(value(r, MeasurementItem.O2).unit()).isEqualTo("PCT");
+        assertThat(value(r, MeasurementItem.H2S).unit()).isEqualTo("PPM");
+        assertThat(value(r, MeasurementItem.LEL).unit()).isEqualTo("PCT_LEL");
+        assertThat(r.notes()).anyMatch(n -> n.startsWith("H2S: 단위가 없어 ppm(으)로 봤습니다"))
+                .anyMatch(n -> n.startsWith("LEL: 단위가 없어 %LEL(으)로 봤습니다"));
+    }
+
+    @Test
+    @DisplayName("단위 표기: 숫자 바로 뒤를 본다 (5% LEL·LEL 3%·피피엠·프로)")
+    void unitWords() {
+        assertThat(LlmExtractionVerifier.unitAfter("가연성가스 5% LEL", 7)).isEqualTo("PCT_LEL");
+        assertThat(LlmExtractionVerifier.unitAfter("인화성 가스 LEL 3%", 12)).isEqualTo("PCT");
+        assertThat(LlmExtractionVerifier.unitAfter("일산화탄소 30 피피엠", 8)).isEqualTo("PPM");
+        assertThat(LlmExtractionVerifier.unitAfter("탄산가스 1.5프로", 8)).isEqualTo("PCT");
+        assertThat(LlmExtractionVerifier.unitAfter("산소 19.5 황화수소 3ppm", 7)).isNull();   // 뒤의 다른 항목 단위는 보지 않음
     }
 
     @Test
@@ -108,7 +133,8 @@ class LlmExtractionVerifierTest {
                 m("O2", "120", "PCT", "산소 120%"), m("O2", "20.9", "PCT", "산소 20.9%"), m("O2", "20.5", "PCT", "다시 20.5%")));
 
         assertThat(value(r, MeasurementItem.O2)).isNull();
-        assertThat(r.notes()).anyMatch(n -> n.contains("측정 범위를 벗어나")).anyMatch(n -> n.startsWith("O2: 값이 둘 이상입니다"));
+        assertThat(r.notes()).anyMatch(n -> n.contains("측정 범위를 벗어나"))
+                .anyMatch(n -> n.startsWith("O2: 값이 둘 이상입니다 (20.9, 20.5). 하나만 적어 주세요"));
     }
 
     @Test
