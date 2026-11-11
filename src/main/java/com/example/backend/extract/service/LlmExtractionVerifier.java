@@ -38,7 +38,8 @@ import java.util.regex.Pattern;
 public final class LlmExtractionVerifier {
 
     static final String SOURCE = "LLM";
-    private static final Pattern NUMBER = Pattern.compile("\\d+(?:\\.\\d+)?");
+    // 숫자 (영문 약어 안의 숫자는 빼고: "CO2=2%" 의 2 는 뒤의 2 만, "H2S 3ppm" 의 2 는 숫자가 아님)
+    private static final Pattern NUMBER = Pattern.compile("(?<![A-Za-z\\d.])\\d+(?:\\.\\d+)?");
 
     private LlmExtractionVerifier() {
     }
