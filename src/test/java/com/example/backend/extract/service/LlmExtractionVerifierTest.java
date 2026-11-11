@@ -27,7 +27,7 @@ class LlmExtractionVerifierTest {
     }
 
     private static RuleInputExtractor.Result verify(String text, LlmExtraction llm, List<RuleInputExtractor.ZoneRef> zones) {
-        return LlmExtractionVerifier.verify(extractor.extract(text, zones), llm, extractor::measurementRule);
+        return LlmExtractionVerifier.verify(extractor.extract(text, zones), llm, extractor::measurementRule, extractor::itemAt);
     }
 
     private static RuleInputExtractor.Result verify(String text, LlmExtraction llm) {
@@ -131,5 +131,58 @@ class LlmExtractionVerifierTest {
 
         assertThat(r.form()).doesNotContainKey("watcher_name");
         assertThat(r.notes()).anyMatch(n -> n.startsWith("감시자: 찾은 이름(김철수)"));
+    }
+
+    @Test
+    @DisplayName("항목을 바꿔 읽은 값은 버림: 산소 20.9 를 CO2 로 (11/11 0.6B 측정에서 나온 경우)")
+    void wrongItem() {
+        String text = "산소 20.9% 황화수소 3ppm 일산화탄소 5ppm";
+        RuleInputExtractor.Result r = verify(text, llm(
+                m("CO2", "20.9", "PCT", "산소 20.9%"), m("H2S", "3", "PPM", "황화수소 3ppm"), m("CO2", "5", "PPM", "일산화탄소 5ppm")));
+
+        assertThat(value(r, MeasurementItem.CO2)).isNull();
+        assertThat(value(r, MeasurementItem.H2S).value()).isEqualByComparingTo("3");
+        assertThat(r.notes()).anyMatch(n -> n.startsWith("CO2: 값 20.9은(는) 문장에서 O2 값이라"))
+                .anyMatch(n -> n.startsWith("CO2: 값 5은(는) 문장에서 CO 값이라"));
+    }
+
+    @Test
+    @DisplayName("CO 와 CO2 를 구분한다 (CO2 안의 CO 를 일산화탄소로 보지 않음)")
+    void coAndCo2() {
+        String text = "CO2 0.5% CO 30ppm";
+        RuleInputExtractor.Result ok = verify(text, llm(m("CO2", "0.5", "PCT", "CO2 0.5%"), m("CO", "30", "PPM", "CO 30ppm")));
+        assertThat(value(ok, MeasurementItem.CO2).value()).isEqualByComparingTo("0.5");
+        assertThat(value(ok, MeasurementItem.CO).value()).isEqualByComparingTo("30");
+
+        RuleInputExtractor.Result swapped = verify(text, llm(m("CO", "0.5", "PPM", "CO2 0.5%")));
+        assertThat(swapped.measurements()).isEmpty();
+        assertThat(swapped.notes()).anyMatch(n -> n.startsWith("CO: 값 0.5은(는) 문장에서 CO2 값이라"));
+    }
+
+    @Test
+    @DisplayName("근거가 여러 항목에 걸쳐 있어도 숫자 바로 앞 이름으로 항목을 본다")
+    void longEvidence() {
+        String text = "산소 20.9% 황화수소 3ppm";
+        RuleInputExtractor.Result r = verify(text, llm(m("O2", "20.9", "PCT", text), m("H2S", "3", "PPM", text)));
+
+        assertThat(value(r, MeasurementItem.O2).value()).isEqualByComparingTo("20.9");
+        assertThat(value(r, MeasurementItem.H2S).value()).isEqualByComparingTo("3");
+    }
+
+    @Test
+    @DisplayName("숫자 앞뒤에 항목 이름이 없으면 막지 않는다 (지금처럼 단위·범위만 확인)")
+    void noNameNearby() {
+        RuleInputExtractor.Result r = verify("측정 결과 20.9% 정상", llm(m("O2", "20.9", "PCT", "20.9%")));
+
+        assertThat(value(r, MeasurementItem.O2).value()).isEqualByComparingTo("20.9");
+    }
+
+    @Test
+    @DisplayName("이름이 숫자 뒤에만 있으면 뒤의 이름으로 본다 (20.9% 산소)")
+    void nameAfterNumber() {
+        RuleInputExtractor.Result r = verify("20.9% 산소 확인", llm(m("O2", "20.9", "PCT", "20.9% 산소"), m("CO2", "20.9", "PCT", "20.9%")));
+
+        assertThat(value(r, MeasurementItem.O2).value()).isEqualByComparingTo("20.9");
+        assertThat(value(r, MeasurementItem.CO2)).isNull();
     }
 }

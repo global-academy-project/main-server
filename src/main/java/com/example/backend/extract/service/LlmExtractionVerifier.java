@@ -21,6 +21,8 @@ import java.util.regex.Pattern;
  * 서버는 그 값을 확인만 한 뒤 규칙 엔진으로 넘긴다. 사전(규칙) 추출 값은 섞지 않는다.
  * <ul>
  *   <li>측정값: 근거 문구가 원문에 그대로 있고 그 안에 값 숫자가 있어야 한다 (지어낸 값 차단)</li>
+ *   <li>그 숫자가 원문에서 그 항목 이름 뒤(앞에 없으면 앞)에 있어야 한다. "산소 20.9%" 를 CO2 로 읽으면 버림.
+ *       숫자 앞뒤에 항목 이름이 하나도 없으면 막지 않는다 (사전 추출도 이름 없는 숫자는 못 잡으므로)</li>
  *   <li>단위가 그 항목이 받는 단위(사전 units)이고, 근거 문구에 적힌 단위와도 맞아야 한다 ("황화수소 5%"를 ppm 으로 읽으면 버림)</li>
  *   <li>값이 0 이상 사전 max 이하여야 한다</li>
  *   <li>같은 항목에 값이 둘 이상이면 비운다</li>
@@ -38,12 +40,20 @@ public final class LlmExtractionVerifier {
     private LlmExtractionVerifier() {
     }
 
+    /** 원문의 숫자 위치 → 그 숫자의 측정 항목 (RuleInputExtractor::itemAt). 이름이 없으면 null */
+    @FunctionalInterface
+    public interface ItemLocator {
+        MeasurementItem itemAt(String text, int numStart, int numEnd);
+    }
+
     /**
-     * @param zone  사전 추출 결과 (구역과 구역 관련 안내만 쓴다)
-     * @param rules 측정 항목별 사전 규칙 (받는 단위·최대값)
+     * @param zone    사전 추출 결과 (구역과 구역 관련 안내만 쓴다)
+     * @param rules   측정 항목별 사전 규칙 (받는 단위·최대값)
+     * @param locator 원문 숫자 위치의 측정 항목 (항목을 바꿔 읽은 값 차단)
      */
     public static RuleInputExtractor.Result verify(RuleInputExtractor.Result zone, LlmExtraction llm,
-                                                  Function<MeasurementItem, ExtractDictionary.Measurement> rules) {
+                                                  Function<MeasurementItem, ExtractDictionary.Measurement> rules,
+                                                  ItemLocator locator) {
         String text = zone.text();
         List<String> notes = new ArrayList<>();
         zone.notes().stream().filter(n -> n.startsWith("구역")).forEach(notes::add);
@@ -58,6 +68,14 @@ public final class LlmExtractionVerifier {
             String evidence = m.evidence() == null ? "" : m.evidence().strip();
             if (evidence.isEmpty() || !text.contains(evidence) || !containsNumber(evidence, m.value())) {
                 notes.add(item + ": 찾은 값(" + m.value().toPlainString() + ")이 문장에 그대로 없어 비워 둡니다.");
+                continue;
+            }
+            int[] at = numberSpan(evidence, m.value());
+            int base = text.indexOf(evidence);
+            MeasurementItem named = locator.itemAt(text, base + at[0], base + at[1]);
+            if (named != null && named != item) {
+                notes.add(item + ": 값 " + m.value().toPlainString() + "은(는) 문장에서 " + named + " 값이라 비워 둡니다 (\""
+                        + evidence + "\").");
                 continue;
             }
             ExtractDictionary.Measurement rule = rules.apply(item);
@@ -125,11 +143,16 @@ public final class LlmExtractionVerifier {
 
     /** 근거 문구 안에 값 숫자가 그대로 있나 (17.5 ↔ "17.5", 18 ↔ "18" 또는 "18.0") */
     static boolean containsNumber(String evidence, BigDecimal value) {
+        return numberSpan(evidence, value) != null;
+    }
+
+    /** 근거 문구 안에서 값 숫자가 처음 나오는 위치 [시작, 끝). 없으면 null */
+    private static int[] numberSpan(String evidence, BigDecimal value) {
         Matcher m = NUMBER.matcher(evidence);
         while (m.find()) {
-            if (new BigDecimal(m.group()).compareTo(value) == 0) return true;
+            if (new BigDecimal(m.group()).compareTo(value) == 0) return new int[]{m.start(), m.end()};
         }
-        return false;
+        return null;
     }
 
     private static MeasurementItem itemOf(String s) {
