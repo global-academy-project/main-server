@@ -18,8 +18,10 @@ import java.io.InputStream;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 /**
  * 문장 → 규칙 입력 추출 + 미리 판정 (계획서 7-4장 ②, ③은 기존 규칙 엔진 그대로).
@@ -74,12 +76,11 @@ public class RuleInputExtractService {
 
     /**
      * @param retryLlmFailure true(미리 보기): 기억한 LLM 응답이 실패면 다시 부른다.
-     *                        false(허가서 반영): 미리 보기 때 받은 응답을 성공·실패 그대로 써서 사용자가 본 결과와 같게 기록한다
+     *                        false: 기억한 응답을 성공·실패 그대로 쓴다 (기억이 없으면 부른다).
+     *                        허가서 반영은 11/12부터 LLM 을 부르지 않는 recorded() 를 쓴다
      */
     public Extraction run(String text, Long siteId, boolean retryLlmFailure) {
-        List<RuleInputExtractor.ZoneRef> zones = zoneRepository.findBySiteIdAndActiveTrueOrderByCodeAsc(siteId).stream()
-                .map(z -> new RuleInputExtractor.ZoneRef(z.getId(), z.getCode(), z.getName())).toList();
-        RuleInputExtractor.Result ruleResult = extractor.extract(text, zones);
+        RuleInputExtractor.Result ruleResult = ruleExtract(text, siteId);
         String rule = "RULE:" + extractor.version();
         if (llmClient.name() == null) {
             return new Extraction(ruleResult, rule);
@@ -89,10 +90,76 @@ public class RuleInputExtractService {
         if (llm.isPresent()) {
             return new Extraction(LlmExtractionVerifier.verify(ruleResult, llm.get(), extractor::measurementRule, extractor::itemAt), llmClient.name());
         }
-        List<String> notes = new ArrayList<>(ruleResult.notes());
-        notes.add("LLM 추출을 쓰지 못해 사전(규칙) 추출 결과만 보여 줍니다.");
-        return new Extraction(new RuleInputExtractor.Result(ruleResult.text(), ruleResult.workTypes(), ruleResult.zoneId(),
-                ruleResult.zoneEvidence(), ruleResult.measurements(), ruleResult.form(), notes), rule);
+        return new Extraction(withNote(ruleResult, "LLM 추출을 쓰지 못해 사전(규칙) 추출 결과만 보여 줍니다."), rule);
+    }
+
+    /**
+     * 허가서 반영용 (11/12): LLM 을 부르지 않는다. 반영 요청이 LLM 을 기다리다 화면 대기(60초)를 넘겨
+     * "저장 결과를 확인할 수 없음"이 되지 않게 하려고.
+     * 미리 보기 때 기억한 LLM 응답이 있으면 그대로(성공·실패 그대로) 쓰고, 없으면(30분 지남·서버 재시작) 사전(규칙) 추출로 기록한다.
+     * 저장되는 측정값은 사용자가 확인한 값이고, 이 결과는 "서버가 뽑은 값" 기록(_source.extracted)에만 쓴다.
+     */
+    public Extraction recorded(String text, Long siteId) {
+        RuleInputExtractor.Result ruleResult = ruleExtract(text, siteId);
+        String rule = "RULE:" + extractor.version();
+        if (llmClient.name() == null) {
+            return new Extraction(ruleResult, rule);
+        }
+        var cached = llmCache.peek(ruleResult.text());
+        if (cached.isPresent() && cached.get().isPresent()) {
+            return new Extraction(LlmExtractionVerifier.verify(ruleResult, cached.get().get(), extractor::measurementRule, extractor::itemAt), llmClient.name());
+        }
+        return new Extraction(withNote(ruleResult, cached.isPresent()
+                ? "LLM 추출을 쓰지 못해 사전(규칙) 추출 결과만 보여 줍니다."
+                : "미리 보기 때의 LLM 결과가 없어(30분이 지났거나 서버가 다시 시작됨) 사전(규칙) 추출 결과로 기록했습니다."), rule);
+    }
+
+    /**
+     * 여러 문장의 추출을 하나로 합친다 (11/12, 문장을 나눠 채운 뒤 한 번에 반영할 때). 화면이 칸을 합치는 순서와 같게
+     * 뒤 문장이 같은 항목·양식 값을 덮는다. 작업 종류는 처음 찾은 근거를 남기고, 구역은 처음 찾은 것을 쓴다.
+     */
+    public static Extraction merge(List<Extraction> parts) {
+        if (parts.size() == 1) {
+            return parts.get(0);
+        }
+        Map<WorkType, RuleInputExtractor.WorkTypeHit> types = new LinkedHashMap<>();
+        Map<MeasurementItem, RuleInputExtractor.Value> values = new LinkedHashMap<>();
+        Map<String, Object> form = new LinkedHashMap<>();
+        Set<String> notes = new LinkedHashSet<>();
+        Set<String> extractors = new LinkedHashSet<>();
+        List<String> texts = new ArrayList<>();
+        Long zoneId = null;
+        String zoneEvidence = null;
+        for (Extraction part : parts) {
+            RuleInputExtractor.Result r = part.result();
+            texts.add(r.text());
+            r.workTypes().forEach(t -> types.putIfAbsent(t.type(), t));
+            r.measurements().forEach(v -> {
+                values.remove(v.item());   // 뒤 문장 값이 순서도 뒤로
+                values.put(v.item(), v);
+            });
+            form.putAll(r.form());
+            notes.addAll(r.notes());
+            extractors.add(part.extractor());
+            if (zoneId == null && r.zoneId() != null) {
+                zoneId = r.zoneId();
+                zoneEvidence = r.zoneEvidence();
+            }
+        }
+        return new Extraction(new RuleInputExtractor.Result(String.join("\n", texts), List.copyOf(types.values()), zoneId,
+                zoneEvidence, List.copyOf(values.values()), form, List.copyOf(notes)), String.join(",", extractors));
+    }
+
+    private RuleInputExtractor.Result ruleExtract(String text, Long siteId) {
+        List<RuleInputExtractor.ZoneRef> zones = zoneRepository.findBySiteIdAndActiveTrueOrderByCodeAsc(siteId).stream()
+                .map(z -> new RuleInputExtractor.ZoneRef(z.getId(), z.getCode(), z.getName())).toList();
+        return extractor.extract(text, zones);
+    }
+
+    private static RuleInputExtractor.Result withNote(RuleInputExtractor.Result r, String note) {
+        List<String> notes = new ArrayList<>(r.notes());
+        notes.add(note);
+        return new RuleInputExtractor.Result(r.text(), r.workTypes(), r.zoneId(), r.zoneEvidence(), r.measurements(), r.form(), notes);
     }
 
     public ExtractResponse extract(Long userId, ExtractRequest r) {

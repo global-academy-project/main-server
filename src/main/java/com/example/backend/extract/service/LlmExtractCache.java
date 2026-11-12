@@ -65,6 +65,18 @@ public class LlmExtractCache {
         return response;
     }
 
+    /**
+     * 기억한 응답만 본다 (LLM 을 부르지 않음, 11/12 허가서 반영용).
+     * 비어 있으면 기억이 없음(30분 지남·서버 재시작), 안의 Optional 이 비어 있으면 기억한 응답이 실패.
+     */
+    public Optional<Optional<LlmExtraction>> peek(String text) {
+        Instant now = clock.instant();
+        synchronized (entries) {
+            Entry hit = entries.get(text);
+            return hit != null && hit.at().plus(ttl).isAfter(now) ? Optional.of(hit.response()) : Optional.empty();
+        }
+    }
+
     int size() {
         synchronized (entries) {
             return entries.size();
