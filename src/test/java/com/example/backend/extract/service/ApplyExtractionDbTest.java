@@ -117,6 +117,26 @@ class ApplyExtractionDbTest {
     }
 
     @Test
+    @DisplayName("문장을 나눠 채운 반영 (11/12): 문장 목록이 기록에 남고, 서버 추출값은 문장들을 합친 것")
+    void applyMultipleSentences() {
+        String first = "R-201 플랜지 용접, 가연성 가스 3%LEL";
+        String second = "가연성 가스 0%LEL, 화재감시자 김철수";
+        ApplyExtractionRequest request = new ApplyExtractionRequest(permitService.get(adminId, permitId).lockVersion(),
+                first + "\n" + second, List.of(new ApplyExtractionRequest.Measurement(MeasurementItem.LEL, BigDecimal.ZERO)),
+                Map.of("watcher_name", "김철수"), List.of(first, second));
+
+        PermitResponse after = service.apply(adminId, permitId, request,
+                service.extractFor(adminId, permitId, request.sentences()));
+
+        @SuppressWarnings("unchecked")
+        Map<String, Object> source = (Map<String, Object>) after.form().get("_source");
+        assertThat(source).containsEntry("text", first + "\n" + second).containsEntry("texts", List.of(first, second));
+        String extracted = source.get("extracted").toString();
+        assertThat(extracted).contains("LEL=0").doesNotContain("LEL=3").contains("김철수");   // 뒤 문장 값이 앞 문장 값을 덮음
+        assertThat(after.watcherName()).isEqualTo("김철수");
+    }
+
+    @Test
     @DisplayName("이 허가 종류에 없는 양식 항목 400, 예전 lockVersion 409")
     void validation() {
         int v = permitService.get(adminId, permitId).lockVersion();

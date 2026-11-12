@@ -68,13 +68,19 @@ public class ExtractApplyService {
 
     /**
      * 반영 전에 서버 추출을 다시 한다 (미리 보기와 같은 순서, 트랜잭션 밖). 권한 확인 포함.
-     * LLM 은 미리 보기 때 받은 응답을 그대로 쓴다 (LlmExtractCache, 실패였으면 실패 그대로) → LLM 을 두 번 부르지 않는다
+     * LLM 은 부르지 않는다 (11/12): 미리 보기 때 받은 응답을 그대로 쓰고(LlmExtractCache, 실패였으면 실패 그대로),
+     * 기억이 없으면 사전(규칙) 추출로 기록한다 (RuleInputExtractService.recorded). 반영은 LLM 을 기다리지 않는다
      */
     public RuleInputExtractService.Extraction extractFor(Long userId, Long permitId, String text) {
+        return extractFor(userId, permitId, List.of(text));
+    }
+
+    /** 문장을 나눠 채운 경우: 문장마다 위와 같이 추출한 뒤 합친다 (뒤 문장이 같은 항목을 덮음, 화면과 같은 순서) */
+    public RuleInputExtractService.Extraction extractFor(Long userId, Long permitId, List<String> texts) {
         Permit permit = permitRepository.findById(permitId)
                 .orElseThrow(() -> new BusinessException(ErrorCode.PERMIT_NOT_FOUND));
         siteGuard.requireAccess(userId, permit.getSiteId());
-        return extractService.run(text, permit.getSiteId(), false);
+        return RuleInputExtractService.merge(texts.stream().map(t -> extractService.recorded(t, permit.getSiteId())).toList());
     }
 
     @Transactional
@@ -119,6 +125,9 @@ public class ExtractApplyService {
         confirmed.put("form", new LinkedHashMap<>(form));
         Map<String, Object> source = new LinkedHashMap<>();
         source.put("text", r.text().strip());
+        if (r.texts() != null && !r.texts().isEmpty()) {
+            source.put("texts", r.texts().stream().map(String::strip).toList());   // 나눠 보낸 문장들 (11/12)
+        }
         source.put("extractor", extraction.extractor());
         source.put("extracted", Map.of("measurement", extractedValues, "form", extracted.form(),
                 "workTypes", extracted.workTypes().stream().map(t -> t.type().name()).toList()));

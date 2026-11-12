@@ -79,6 +79,20 @@ class LlmExtractCacheTest {
     }
 
     @Test
+    @DisplayName("peek: 부르지 않고 기억만 본다 (반영용). 없음·실패·성공·시간 지남 구분")
+    void peek() {
+        assertThat(cache.peek("산소 20.9%")).isEmpty();                              // 기억 없음
+        cache.get("산소 20.9%", true, answer(Optional.empty()));
+        assertThat(cache.peek("산소 20.9%")).contains(Optional.empty());             // 기억한 실패
+        cache.get("산소 20.9%", true, answer(Optional.of(OK)));
+        assertThat(cache.peek("산소 20.9%")).contains(Optional.of(OK));              // 기억한 성공
+        assertThat(calls).hasValue(2);                                               // peek 은 부르지 않음
+
+        clock.plus(Duration.ofMinutes(31));
+        assertThat(cache.peek("산소 20.9%")).isEmpty();                              // 30분 지남
+    }
+
+    @Test
     @DisplayName("200건을 넘으면 가장 오래 안 쓴 것부터 지운다")
     void bounded() {
         for (int i = 0; i < LlmExtractCache.MAX_ENTRIES; i++) {
