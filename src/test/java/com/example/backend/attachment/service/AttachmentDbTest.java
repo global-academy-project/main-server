@@ -261,4 +261,24 @@ class AttachmentDbTest {
         assertThat(kept.check().detectedPeople()).isEqualTo(5);
         assertThat(kept.check().boxes()).hasSize(1);   // 고친 행에도 위치는 이어 둠
     }
+
+    @Test
+    @DisplayName("인식 모델의 안전모 미착용은 UNSURE(확인 필요), 작성자가 미착용으로 고치면 FAIL (11/13)")
+    void helmetFromVisionIsUnsure() {
+        AttachmentResponse a = service.upload(writer, AttachmentOwner.TBM, tbmId,
+                file("h.jpg", TestImages.jpegWithExif("2026:11:03 08:20:00", true)));
+        PhotoVision v = new PhotoVision("YOLOX-Nano+helmet", 3, 1,
+                List.of(new PhotoVision.Box("helmet", 0.9, 0.1, 0.1, 0.1, 0.1), new PhotoVision.Box("no_helmet", 0.8, 0.5, 0.1, 0.1, 0.1)));
+        AttachmentResponse seen = service.applyVision(a.attachmentId(), v);
+        assertThat(seen.check().result()).isEqualTo(PhotoCheckResult.UNSURE);
+        assertThat(seen.check().messages()).anyMatch(m -> m.startsWith("안전모 미착용으로 보이는 사람 1명"));
+        assertThat(seen.check().boxes()).extracting("label").containsExactly("helmet", "no_helmet");
+
+        AttachmentResponse rechecked = service.recheckTbmPhotos(writer, tbmId).stream()
+                .filter(r -> r.attachmentId().equals(a.attachmentId())).findFirst().orElseThrow();
+        assertThat(rechecked.check().result()).isEqualTo(PhotoCheckResult.UNSURE);   // 다시 확인해도 인식 값이면 그대로
+
+        AttachmentResponse fixed = service.correctTbmPhotoCheck(writer, a.attachmentId(), new CorrectPhotoCheckRequest(3, 1, null, "실제로 미착용"));
+        assertThat(fixed.check().result()).isEqualTo(PhotoCheckResult.FAIL);
+    }
 }

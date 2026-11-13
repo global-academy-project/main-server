@@ -91,6 +91,7 @@ app:
       client: ${APP_PHOTO_VISION_CLIENT:none}   # none(인식 안 함, 기본) | mock(고정 값, 화면 확인용) | fastapi(ai-model 사진 인식, 로컬 모델)
       timeout-seconds: ${APP_PHOTO_VISION_TIMEOUT_SECONDS:20}   # 인식 응답 대기. 넘으면 파일 정보 확인 결과만 남긴다
     people-tolerance: 1             # 사진 속 인원이 참석자 명부보다 이만큼 적어도 통과 (촬영자 등)
+    helmet-missing-fails: ${APP_PHOTO_HELMET_MISSING_FAILS:false}   # 인식 모델이 찾은 안전모 미착용: false 면 UNSURE(확인 필요), true 면 FAIL. 우리 사진으로 정확도 확인 후 true (11/13)
   stt:
     client: ${APP_STT_CLIENT:none}   # none(음성 입력 꺼짐, 기본) | mock(고정 문장, 화면 확인용) | fastapi(ai-model Whisper, 로컬 모델)
     timeout-seconds: ${APP_STT_TIMEOUT_SECONDS:30}   # 받아 적기 응답 대기

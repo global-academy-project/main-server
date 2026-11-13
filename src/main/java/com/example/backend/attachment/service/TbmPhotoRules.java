@@ -14,7 +14,9 @@ import java.util.List;
  *   <li>촬영 날짜(JPEG EXIF)가 TBM 날짜와 같으면 통과, 다르면 FAIL, 날짜 정보가 없으면 UNSURE.
  *       날짜 정보가 없을 때 작성자가 "TBM 당일 사진"으로 확인하면 통과</li>
  *   <li>같은 현장에 똑같은 파일(SHA-256)이 이미 있으면 FAIL. 같은 TBM 안에서 다시 올린 것도 FAIL</li>
- *   <li>인원·안전모: 인식 모델이나 작성자가 적은 값. 안전모 미착용이 있으면 FAIL, 모르면 판단하지 않음 (안전화는 사진으로 구별이 어려워 보지 않음)</li>
+ *   <li>인원·안전모: 인식 모델이나 작성자가 적은 값. 안전모 미착용이 있으면 FAIL, 모르면 판단하지 않음 (안전화는 사진으로 구별이 어려워 보지 않음).
+ *       11/13: 인식 모델이 찾은 미착용은 정확도를 우리 사진으로 확인하기 전까지 UNSURE (app.photo.helmet-missing-fails=false).
+ *       작성자가 고친 값의 미착용은 그대로 FAIL</li>
  * </ul>
  * 같은 파일 판단은 파일 내용이 한 바이트도 다르지 않을 때만이다. 같은 장면을 다시 찍었거나, 크기를 줄였거나,
  * 캡처한 사진은 다른 파일로 본다. 촬영 날짜·같은 파일은 파일에서 나온 사실이라 작성자가 고칠 수 없다.
@@ -55,6 +57,15 @@ public final class TbmPhotoRules {
      * @param seen      사진 속 내용 (모르면 Observations.NONE)
      */
     public static Decision check(Long tbmId, LocalDate tbmDate, LocalDateTime takenAt, Duplicate duplicate, Observations seen) {
+        return check(tbmId, tbmDate, takenAt, duplicate, seen, true);
+    }
+
+    /**
+     * @param helmetMissingFails 안전모 미착용이 있을 때 true 면 FAIL, false 면 UNSURE ("미착용으로 보이는 사람, 사진을 확인해 주세요").
+     *                           인식 모델 값은 정확도를 확인하기 전까지 false, 작성자가 고친 값은 true
+     */
+    public static Decision check(Long tbmId, LocalDate tbmDate, LocalDateTime takenAt, Duplicate duplicate, Observations seen,
+                                 boolean helmetMissingFails) {
         List<String> messages = new ArrayList<>();
         boolean fail = false;
         boolean unsure = false;
@@ -87,8 +98,15 @@ public final class TbmPhotoRules {
             messages.add("사진 속 인원 " + seen.people() + "명.");
         }
         if (seen.helmetMissing() != null) {
-            fail |= seen.helmetMissing() > 0;
-            messages.add(seen.helmetMissing() == 0 ? "안전모 모두 착용." : "안전모 미착용 " + seen.helmetMissing() + "명.");
+            if (seen.helmetMissing() == 0) {
+                messages.add("안전모 모두 착용.");
+            } else if (helmetMissingFails) {
+                fail = true;
+                messages.add("안전모 미착용 " + seen.helmetMissing() + "명.");
+            } else {
+                unsure = true;
+                messages.add("안전모 미착용으로 보이는 사람 " + seen.helmetMissing() + "명. 사진을 확인해 주세요.");
+            }
         }
 
         PhotoCheckResult result = fail ? PhotoCheckResult.FAIL : unsure ? PhotoCheckResult.UNSURE : PhotoCheckResult.PASS;
