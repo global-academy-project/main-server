@@ -13,6 +13,7 @@ import com.example.backend.common.exception.ErrorCode;
 import com.example.backend.tbm.entity.TbmRecord;
 import com.example.backend.tbm.repository.TbmRecordRepository;
 import jakarta.persistence.EntityManager;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 import tools.jackson.core.JacksonException;
 import tools.jackson.databind.JsonNode;
@@ -42,14 +43,18 @@ public class TbmPhotoChecks {
     private final TbmRecordRepository tbmRepository;
     private final JsonMapper jsonMapper;
     private final EntityManager em;
+    /** 인식 모델이 찾은 안전모 미착용을 FAIL 로 볼지 (false 면 UNSURE). 작성자가 고친 값은 항상 FAIL */
+    private final boolean helmetMissingFails;
 
     public TbmPhotoChecks(PhotoCheckRepository photoCheckRepository, AttachmentRepository attachmentRepository,
-                          TbmRecordRepository tbmRepository, JsonMapper jsonMapper, EntityManager em) {
+                          TbmRecordRepository tbmRepository, JsonMapper jsonMapper, EntityManager em,
+                          @Value("${app.photo.helmet-missing-fails:false}") boolean helmetMissingFails) {
         this.photoCheckRepository = photoCheckRepository;
         this.attachmentRepository = attachmentRepository;
         this.tbmRepository = tbmRepository;
         this.jsonMapper = jsonMapper;
         this.em = em;
+        this.helmetMissingFails = helmetMissingFails;
     }
 
     /** 앞 행의 사진 속 내용과 고친 정보 */
@@ -139,7 +144,8 @@ public class TbmPhotoChecks {
                 .filter(other -> other.getId() < photo.getId())
                 .map(other -> new TbmPhotoRules.Duplicate(other.getId(), other.getOwnerType(), other.getOwnerId()))
                 .orElse(null);
-        TbmPhotoRules.Decision d = TbmPhotoRules.check(tbm.getId(), tbm.getTbmDate(), photo.getTakenAt(), duplicate, seen);
+        TbmPhotoRules.Decision d = TbmPhotoRules.check(tbm.getId(), tbm.getTbmDate(), photo.getTakenAt(), duplicate, seen,
+                helmetMissingFails || TbmPhotoRules.HUMAN.equals(model));
 
         Map<String, Object> detail = new LinkedHashMap<>();
         detail.put("tbmDate", tbm.getTbmDate().toString());

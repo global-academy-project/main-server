@@ -68,6 +68,26 @@ class TbmPhotoRulesTest {
     }
 
     @Test
+    @DisplayName("인식 모델이 찾은 안전모 미착용 (11/13): 설정이 false 면 UNSURE + 확인 안내, true 면 FAIL. 다른 FAIL 이 있으면 FAIL")
+    void helmetMissingFromModel() {
+        TbmPhotoRules.Observations seen = new TbmPhotoRules.Observations(5, 2, null);
+        TbmPhotoRules.Decision unsure = TbmPhotoRules.check(10L, DAY, LocalDateTime.of(2026, 11, 3, 8, 0), null, seen, false);
+        assertThat(unsure.result()).isEqualTo(PhotoCheckResult.UNSURE);
+        assertThat(unsure.messages()).contains("안전모 미착용으로 보이는 사람 2명. 사진을 확인해 주세요.");
+
+        TbmPhotoRules.Decision fail = TbmPhotoRules.check(10L, DAY, LocalDateTime.of(2026, 11, 3, 8, 0), null, seen, true);
+        assertThat(fail.result()).isEqualTo(PhotoCheckResult.FAIL);
+        assertThat(fail.messages()).contains("안전모 미착용 2명.");
+
+        TbmPhotoRules.Decision otherDay = TbmPhotoRules.check(10L, DAY, LocalDateTime.of(2026, 11, 2, 8, 0), null, seen, false);
+        assertThat(otherDay.result()).isEqualTo(PhotoCheckResult.FAIL);   // 날짜가 다른 FAIL 은 그대로
+
+        TbmPhotoRules.Decision allWorn = TbmPhotoRules.check(10L, DAY, LocalDateTime.of(2026, 11, 3, 8, 0), null,
+                new TbmPhotoRules.Observations(5, 0, null), false);
+        assertThat(allWorn.result()).isEqualTo(PhotoCheckResult.PASS);
+    }
+
+    @Test
     @DisplayName("인원 비교: 명부보다 1명까지 적으면 통과, 더 적거나 많으면 UNSURE, 모르거나 명부가 비면 비교 안 함")
     void people() {
         assertThat(TbmPhotoRules.people(6, 6, 1).result()).isEqualTo(PhotoCheckResult.PASS);
