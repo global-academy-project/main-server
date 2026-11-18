@@ -28,6 +28,7 @@ import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.ApplicationEventPublisher;
 import jakarta.persistence.EntityManager;
+import jakarta.persistence.LockModeType;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.annotation.Transactional;
@@ -122,7 +123,13 @@ public class AuditReportService {
     @Transactional
     public AuditReportResponse get(Long userId, Long siteId, Long reportId) {
         AuditReport r = load(userId, siteId, reportId);
-        accessLog(userId, r, AccessAction.VIEW, null);
+        // 요약 중에는 화면이 몇 초마다 다시 조회한다. 요약을 시작한 뒤 이 사람이 이미 연 기록이 있으면 열람 로그를 또 남기지 않는다
+        boolean polling = r.getStatus() == AuditReportStatus.GENERATING && r.getUpdatedAt() != null
+                && accessLogRepository.existsByUserIdAndResourceTypeAndResourceIdAndCreatedAtGreaterThanEqual(
+                        userId, AccessResource.AUDIT_REPORT, r.getId(), r.getUpdatedAt());
+        if (!polling) {
+            accessLog(userId, r, AccessAction.VIEW, null);
+        }
         return response(r, names(List.of(r)), true);
     }
 
@@ -161,13 +168,15 @@ public class AuditReportService {
     @Transactional
     public AuditReportResponse retrySummary(Long userId, Long siteId, Long reportId) {
         AuditReport report = load(userId, siteId, reportId);
-        boolean stuck = report.getStatus() == AuditReportStatus.GENERATING && report.getUpdatedAt() != null
-                && report.getUpdatedAt().isBefore(LocalDateTime.now(clock).minusSeconds(staleAfterSeconds));
-        if (report.getStatus() != AuditReportStatus.FAILED && !stuck) {
-            throw new BusinessException(ErrorCode.INVALID_STATE, "요약에 실패한 감사보고서만 다시 요약할 수 있습니다.");
+        if (!retryable(report)) {
+            throw new BusinessException(ErrorCode.INVALID_STATE,
+                    "요약에 실패했거나 요약 중으로 오래 멈춘 감사보고서만 다시 요약할 수 있습니다.");
         }
         run(report::restartSummary);
+        // 멈춘 요약(이미 GENERATING)은 바뀌는 칼럼이 없어 UPDATE 가 안 나간다. 판을 올려 updated_at 도 새로 찍는다
+        em.lock(report, LockModeType.OPTIMISTIC_FORCE_INCREMENT);
         reportRepository.saveAndFlush(report);
+        em.refresh(report);   // 고친 시각(updated_at)은 DB가 바꾼다. 멈춤 판단·열람 로그 기준이라 다시 읽는다
         events.publishEvent(new AuditReportRequestedEvent(report.getId()));
         return response(report, names(List.of(report)), true);
     }
@@ -219,6 +228,7 @@ public class AuditReportService {
         }
         run(() -> report.edit(r.title(), blankToNull(r.summary()), jsonMapper.writeValueAsString(items)));
         reportRepository.saveAndFlush(report);
+        em.refresh(report);   // 고친 시각(updated_at)은 DB 값
         return response(report, names(List.of(report)), true);
     }
 
@@ -262,7 +272,7 @@ public class AuditReportService {
             correctiveRate(item, siteId, from, to);
             return item;
         }
-        SearchRecordsResult result = recordSearchService.query(siteId, type, Map.of("from", from.toString(), "to", to.toString()));
+        SearchRecordsResult result = recordSearchService.query(siteId, type, Map.<String, Object>of("from", from.toString(), "to", to.toString()));
         item.set("stats", jsonMapper.valueToTree(result.summary()));
         item.put("total", result.total());
         item.put("truncated", result.truncated());
@@ -372,6 +382,15 @@ public class AuditReportService {
 
     // ------------------------------------------------------------------ 내부
 
+    /** AI 요약 다시 하기 가능: 요약 실패, 또는 요약 중으로 app.agent.stale-after-seconds 넘게 멈춤 */
+    private boolean retryable(AuditReport report) {
+        if (report.getStatus() == AuditReportStatus.FAILED) {
+            return true;
+        }
+        return report.getStatus() == AuditReportStatus.GENERATING && report.getUpdatedAt() != null
+                && report.getUpdatedAt().isBefore(LocalDateTime.now(clock).minusSeconds(staleAfterSeconds));
+    }
+
     private AuditReport load(Long userId, Long siteId, Long reportId) {
         siteGuard.requireSiteAdmin(userId, siteId);
         AuditReport r = reportRepository.findById(reportId)
@@ -400,7 +419,7 @@ public class AuditReportService {
         return new AuditReportResponse(r.getId(), r.getSiteId(), r.getTitle(), r.getDateFrom(), r.getDateTo(),
                 List.of(r.getQueryTypes().split(",")), r.getStatus(), r.getStatus().label(), r.getOverallVerification(),
                 r.getFailureReason(), r.getSummary(), items, r.getCreatedBy(), names.get(r.getCreatedBy()),
-                r.getCreatedAt(), r.getUpdatedAt(), r.getLockVersion());
+                r.getCreatedAt(), r.getUpdatedAt(), r.getLockVersion(), retryable(r));
     }
 
     private static String blankToNull(String s) {
