@@ -26,6 +26,8 @@ dependencies {
     // 인증 메일 (app.mail.mode=smtp 일 때 사용)
     implementation 'org.springframework.boot:spring-boot-starter-mail'
     implementation 'org.springframework.boot:spring-boot-starter-security'
+    // 상태 확인 주소 /actuator/health (Compose healthcheck 가 본다). 노출은 health 하나만 (application.yaml management)
+    implementation 'org.springframework.boot:spring-boot-starter-actuator'
     implementation 'org.springframework.boot:spring-boot-starter-validation'
     implementation 'org.springframework.boot:spring-boot-starter-webmvc'
     implementation 'org.springdoc:springdoc-openapi-starter-webmvc-ui:3.1.1'

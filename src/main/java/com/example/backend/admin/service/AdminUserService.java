@@ -107,11 +107,17 @@ public class AdminUserService {
     @Transactional
     public AdminUserResponse changeRole(Long adminId, Long userId, UserRole role) {
         User user = load(userId);
-        if (user.getRole() == UserRole.ADMIN && role != UserRole.ADMIN) {
+        boolean demote = user.getRole() == UserRole.ADMIN && role != UserRole.ADMIN;
+        if (demote) {
             guardNotSelf(adminId, userId, "자기 자신의 관리자 권한은 뺄 수 없습니다.");
             guardOtherActiveAdmin(user);
         }
         user.changeRole(role);
+        if (demote) {
+            // 관리자 이전에 받았던 현장 권한이 강등과 함께 되살아나지 않게 모두 회수한다 (행은 남기고 INACTIVE).
+            // 일반 회원으로서의 현장 권한은 관리자가 다시 정한다.
+            siteMemberRepository.findByUserId(userId).stream().filter(SiteMember::isActive).forEach(SiteMember::revoke);
+        }
         return toResponse(user);
     }
 
