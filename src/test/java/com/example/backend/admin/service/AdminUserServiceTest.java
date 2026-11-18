@@ -162,6 +162,35 @@ class AdminUserServiceTest {
     }
 
     @Test
+    @DisplayName("관리자 → 일반 회원: 남아 있던 현장 권한을 모두 회수한다")
+    void demote_revokesSiteGrants() {
+        User u = user(2L, UserStatus.ACTIVE, true, UserRole.ADMIN);
+        when(userRepository.countByRoleAndStatus(UserRole.ADMIN, UserStatus.ACTIVE)).thenReturn(2L);
+        SiteMember ulsan = new SiteMember(2L, 1L, SiteRole.SITE_ADMIN, 1L);
+        SiteMember yeosu = new SiteMember(2L, 2L, SiteRole.WRITER, 1L);
+        when(siteMemberRepository.findByUserId(2L)).thenReturn(new ArrayList<>(List.of(ulsan, yeosu)));
+
+        service.changeRole(1L, 2L, UserRole.MEMBER);
+
+        assertThat(u.getRole()).isEqualTo(UserRole.MEMBER);
+        assertThat(ulsan.isActive()).isFalse();
+        assertThat(yeosu.isActive()).isFalse();
+    }
+
+    @Test
+    @DisplayName("일반 회원 → 관리자: 현장 권한은 그대로 둔다")
+    void promote_keepsSiteGrants() {
+        User u = user(7L, UserStatus.ACTIVE, true, UserRole.MEMBER);
+        SiteMember ulsan = new SiteMember(7L, 1L, SiteRole.WRITER, 1L);
+        when(siteMemberRepository.findByUserId(7L)).thenReturn(new ArrayList<>(List.of(ulsan)));
+
+        service.changeRole(1L, 7L, UserRole.ADMIN);
+
+        assertThat(u.getRole()).isEqualTo(UserRole.ADMIN);
+        assertThat(ulsan.isActive()).isTrue();
+    }
+
+    @Test
     @DisplayName("사용 중지: INACTIVE + 세션 모두 끊기(ADMIN), 다시 사용: ACTIVE")
     void deactivate_reactivate() {
         User u = user(7L, UserStatus.ACTIVE, true, UserRole.MEMBER);
