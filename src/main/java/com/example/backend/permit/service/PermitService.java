@@ -4,6 +4,10 @@ import com.example.backend.approval.entity.ApprovalTarget;
 import com.example.backend.approval.service.ApprovalService;
 import com.example.backend.common.exception.BusinessException;
 import com.example.backend.common.exception.ErrorCode;
+import com.example.backend.history.entity.HistoryAction;
+import com.example.backend.history.entity.HistoryTarget;
+import com.example.backend.history.entity.RecordHistory;
+import com.example.backend.history.repository.RecordHistoryRepository;
 import com.example.backend.permit.dto.AddMeasurementsRequest;
 import com.example.backend.permit.dto.CreatePermitRequest;
 import com.example.backend.permit.dto.PermitCheckResponse;
@@ -71,6 +75,7 @@ public class PermitService {
     private final WorkWarningRepository warningRepository;
     private final SiteGuard siteGuard;
     private final ApprovalService approvalService;
+    private final RecordHistoryRepository historyRepository;
     private final JsonMapper jsonMapper;
     private final Clock clock;
 
@@ -79,7 +84,7 @@ public class PermitService {
                          RuleEvaluationRepository evaluationRepository, RuleViolationRepository violationRepository,
                          RuleRepository ruleRepository, WorkWarningRepository warningRepository,
                          SiteGuard siteGuard, ApprovalService approvalService,
-                         JsonMapper jsonMapper, Clock clock) {
+                         RecordHistoryRepository historyRepository, JsonMapper jsonMapper, Clock clock) {
         this.permitRepository = permitRepository;
         this.measurementRepository = measurementRepository;
         this.workRepository = workRepository;
@@ -90,6 +95,7 @@ public class PermitService {
         this.warningRepository = warningRepository;
         this.siteGuard = siteGuard;
         this.approvalService = approvalService;
+        this.historyRepository = historyRepository;
         this.jsonMapper = jsonMapper;
         this.clock = clock;
     }
@@ -105,7 +111,7 @@ public class PermitService {
             throw new BusinessException(ErrorCode.INVALID_STATE, "이 작업에 같은 종류의 허가서가 이미 있습니다.");
         }
         String prefix = r.permitType().name() + "-" + r.validFrom().format(NO_DATE) + "-";
-        long seq = permitRepository.countBySiteIdAndPermitNoStartingWith(work.getSiteId(), prefix) + 1;
+        long seq = permitRepository.countBySiteIdAndPermitNoStartingWithAndRevision(work.getSiteId(), prefix, 1) + 1;
         Permit permit = permitRepository.saveAndFlush(new Permit(work.getSiteId(), work.getId(), r.permitType(),
                 prefix + String.format("%03d", seq), r.validFrom(), r.validTo(), blankToNull(r.watcherName()),
                 blankToNull(r.supervisorName()), toJson(r.form()), user.getId()));
@@ -135,6 +141,40 @@ public class PermitService {
     public PermitResponse get(Long userId, Long permitId) {
         Permit permit = load(userId, permitId);
         return toResponse(permit);
+    }
+
+    /**
+     * 반려된 허가서에서 새 판 (허가번호·기간·감시자·양식 값 복사, 판 번호 + 1, 작성 중). 이전 판은 SUPERSEDED 로 남는다.
+     * 측정값과 판정은 가져오지 않으므로 새 판에서 다시 측정·판정한 뒤 승인 요청한다.
+     */
+    @Transactional
+    public PermitResponse revise(Long userId, Long permitId) {
+        Permit prev = load(userId, permitId);
+        if (prev.getStatus() != PermitStatus.REJECTED) {
+            throw new BusinessException(ErrorCode.INVALID_STATE,
+                    "반려된 허가서만 새 판을 만들 수 있습니다 (현재 " + prev.getStatus() + ").");
+        }
+        Permit latest = permitRepository.findTopByWorkIdAndPermitTypeOrderByRevisionDesc(prev.getWorkId(), prev.getPermitType())
+                .orElse(prev);
+        if (!latest.getId().equals(prev.getId())) {
+            throw new BusinessException(ErrorCode.INVALID_STATE, "이미 새 판이 있습니다 (" + latest.getRevision() + "판).");
+        }
+        // 이전 판을 먼저 대체 처리한다: 같은 허가를 동시에 두 번 요청하면 뒤 요청은 버전 충돌(409)로 끝난다
+        Permit draft = prev.newRevision(userId);
+        prev.supersede();
+        permitRepository.saveAndFlush(prev);
+        Permit next = permitRepository.saveAndFlush(draft);
+        history(next, prev, userId);
+        return toResponse(next);
+    }
+
+    private void history(Permit next, Permit prev, Long userId) {
+        Map<String, Object> after = new LinkedHashMap<>();
+        after.put("permitNo", next.getPermitNo());
+        after.put("revision", next.getRevision());
+        after.put("previousPermitId", prev.getId());
+        historyRepository.save(RecordHistory.byUser(next.getSiteId(), HistoryTarget.PERMIT, next.getId(),
+                HistoryAction.CREATE, userId, null, jsonMapper.writeValueAsString(after)));
     }
 
     // ------------------------------------------------------------------ 측정값

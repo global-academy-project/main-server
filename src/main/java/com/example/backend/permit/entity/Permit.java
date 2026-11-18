@@ -8,7 +8,7 @@ import java.time.LocalDateTime;
 
 /**
  * 작업허가서 한 판(revision). 테이블 규칙은 V4 permits. 테이블 전체를 매핑해 두고 기능은 담당자가 메서드로 더한다.
- * 승인 요청(PENDING) 뒤에는 내용을 고칠 수 없다 (V9 trg_permits_lock). 바꾸려면 새 판을 만든다 (예정).
+ * 승인 요청(PENDING) 뒤에는 내용을 고칠 수 없다 (V9 trg_permits_lock). 바꾸려면 새 판을 만든다.
  * form_data: 양식 입력값 JSON (예: {"extinguisher_ready": true, "spark_prevention": true})
  */
 @Entity
@@ -139,6 +139,30 @@ public class Permit {
     public void reject() {
         requirePending();
         this.status = PermitStatus.REJECTED;
+    }
+
+    /**
+     * 반려된 판을 다시 쓸 새 판. 허가번호·기간·감시자·양식 값을 그대로 복사하고 revision + 1, DRAFT.
+     * 판정(last_evaluation_id)·측정값·에이전트 실행은 가져오지 않는다 (새 판에서 다시 측정·판정).
+     * 이 행은 supersede() 로 SUPERSEDED 처리한다. 작성자는 새 판을 만드는 사람.
+     */
+    public Permit newRevision(Long writerId) {
+        if (status != PermitStatus.REJECTED) {
+            throw new IllegalStateException("반려된 허가서만 새 판을 만들 수 있습니다 (현재 " + status + ").");
+        }
+        Permit next = new Permit(siteId, workId, permitType, permitNo, validFrom, validTo, watcherName, supervisorName,
+                formData, writerId);
+        next.revision = revision + 1;
+        next.formSchemaVersion = formSchemaVersion;
+        return next;
+    }
+
+    /** 새 판이 생겨 대체됨 (반려된 판만) */
+    public void supersede() {
+        if (status != PermitStatus.REJECTED) {
+            throw new IllegalStateException("반려된 허가서만 새 판으로 대체할 수 있습니다 (현재 " + status + ").");
+        }
+        this.status = PermitStatus.SUPERSEDED;
     }
 
     /** 요청자가 결재를 회수 → 다시 작성 중. 내용은 그대로라 최근 판정도 그대로 유효 */
