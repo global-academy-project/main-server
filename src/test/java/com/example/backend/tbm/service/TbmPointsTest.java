@@ -11,7 +11,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 class TbmPointsTest {
 
     private final TbmService service = new TbmService(null, null, null, null, null, null, null, null, null,
-            JsonMapper.builder().build(), null);
+            JsonMapper.builder().build(), null, null);
 
     @Test
     @DisplayName("JSON 배열은 목록으로(빈 값·문자 아닌 값 제외), 그 밖의 글은 한 줄, 없으면 빈 목록")

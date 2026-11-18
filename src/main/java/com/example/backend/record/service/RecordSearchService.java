@@ -127,9 +127,26 @@ public class RecordSearchService {
                 .orElseThrow(() -> new BusinessException(ErrorCode.INVALID_REQUEST, "agentRunId 에 해당하는 이 현장의 실행이 없습니다."));
         siteGuard.requireAccess(run.getUserId(), req.siteId());
 
-        RecordQueryType type = RecordQueryType.of(req.queryType())
-                .orElseThrow(() -> new BusinessException(ErrorCode.INVALID_REQUEST, "모르는 조회 유형입니다: " + req.queryType()));
-        Params p = new Params(req.siteId(), type, req.params() == null ? new HashMap<>() : req.params());
+        SearchRecordsResult result = query(req.siteId(), req.queryType(), req.params());
+
+        Map<String, Object> detail = new LinkedHashMap<>();
+        detail.put("queryType", result.queryType());
+        detail.put("conditions", result.conditions());
+        detail.put("total", result.total());
+        accessLogRepository.save(new RecordAccessLog(run.getUserId(), req.siteId(), AccessResource.RECORD_QUERY, run.getId(),
+                AccessAction.QUERY, jsonMapper.writeValueAsString(detail), null));
+        return result;
+    }
+
+    /**
+     * 조회만 (열람 기록은 부르는 쪽이 남긴다). 감사보고서 집계도 이것을 쓴다.
+     * 권한 확인은 부르는 쪽 책임 (search 는 실행한 사람, 감사보고서는 현장 관리자 이상).
+     */
+    @Transactional(readOnly = true)
+    public SearchRecordsResult query(Long siteId, String queryType, Map<String, Object> params) {
+        RecordQueryType type = RecordQueryType.of(queryType)
+                .orElseThrow(() -> new BusinessException(ErrorCode.INVALID_REQUEST, "모르는 조회 유형입니다: " + queryType));
+        Params p = new Params(siteId, type, params == null ? new HashMap<>() : new HashMap<>(params));
 
         Out out = switch (type) {
             case MISSING_MEASUREMENTS -> missingMeasurements(p);
@@ -150,14 +167,6 @@ public class RecordSearchService {
         boolean truncated = total > records.size();
         Map<String, Object> summary = out.summary != null ? out.summary : new LinkedHashMap<>(Map.of("count", total));
         List<Evidence> evidence = out.evidence.stream().distinct().limit(maxRows).toList();
-
-        Map<String, Object> detail = new LinkedHashMap<>();
-        detail.put("queryType", type.code());
-        detail.put("conditions", p.conditions);
-        detail.put("total", total);
-        accessLogRepository.save(new RecordAccessLog(run.getUserId(), req.siteId(), AccessResource.RECORD_QUERY, run.getId(),
-                AccessAction.QUERY, jsonMapper.writeValueAsString(detail), null));
-
         return new SearchRecordsResult(type.code(), p.conditions, total, truncated, summary, new ArrayList<>(records), evidence);
     }
 

@@ -121,4 +121,36 @@ public class MockAgentClient implements AgentClient {
         data.put("answer", "[mock] \"" + call.message() + "\" 질문을 받았습니다. 실제 기록 조회는 AI 서버(기록 질문 에이전트) 연결 후 됩니다.");
         return new AgentReply(data);
     }
+
+    /** 감사보고서: 항목마다 집계 값을 그대로 적은 요약, 검증 MATCH (화면·저장 흐름 확인용) */
+    @Override
+    public AgentReply auditReport(java.util.Map<String, Object> body) {
+        tools.jackson.databind.node.ObjectNode data = jsonMapper.createObjectNode();
+        data.put("reportId", ((Number) body.get("reportId")).longValue());
+        data.put("siteId", ((Number) body.get("siteId")).longValue());
+        data.put("dateFrom", String.valueOf(body.get("dateFrom")));
+        data.put("dateTo", String.valueOf(body.get("dateTo")));
+        data.put("status", "DRAFT");
+        data.put("overallVerification", "PASS");
+        tools.jackson.databind.node.ArrayNode items = data.putArray("items");
+        Object raw = body.get("items");
+        if (raw instanceof java.util.List<?> list) {
+            for (Object o : list) {
+                if (!(o instanceof java.util.Map<?, ?> item)) {
+                    continue;
+                }
+                tools.jackson.databind.node.ObjectNode out = items.addObject();
+                out.put("queryType", String.valueOf(item.get("queryType")));
+                out.put("title", String.valueOf(item.get("title")));
+                out.put("summary", "(연습 요약) " + item.get("title") + ": " + item.get("stats"));
+                tools.jackson.databind.node.ObjectNode verification = out.putObject("verification");
+                verification.put("status", "MATCH");
+                verification.putArray("expectedNumbers");
+                verification.putArray("actualNumbers");
+                verification.putArray("mismatches");
+                out.putArray("evidence");
+            }
+        }
+        return new AgentReply(data);
+    }
 }

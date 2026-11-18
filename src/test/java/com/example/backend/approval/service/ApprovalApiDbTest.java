@@ -139,6 +139,14 @@ class ApprovalApiDbTest {
         return id;
     }
 
+    /** 작업허가 최종 승인에 필요한 승인된 위험성평가 (지금 작업에 바로 승인 상태로 저장) */
+    private void approvedRisk() {
+        RiskAssessment risk = RiskAssessment.daily(siteId, workId, LocalDate.of(2026, 11, 2), writer);
+        risk.submit();
+        risk.approve();
+        riskRepository.saveAndFlush(risk);
+    }
+
     private Approval pendingApprovalOf(ApprovalTarget type, Long targetId) {
         return approvalRepository.findByTargetTypeAndTargetIdAndStatus(type, targetId, ApprovalStatus.PENDING).orElseThrow();
     }
@@ -217,6 +225,7 @@ class ApprovalApiDbTest {
     @DisplayName("승인 → 결재 APPROVED, 허가서 APPROVED, 결과 알림은 요청자에게")
     void approve_permitApproved() {
         site("VERIFY");
+        approvedRisk();
         Long permitId = submittedPermit(writer);
         Long approvalId = pendingApprovalOf(ApprovalTarget.PERMIT, permitId).getId();
 
@@ -238,6 +247,7 @@ class ApprovalApiDbTest {
     @DisplayName("이미 결정된 결재는 다시 승인할 수 없다")
     void approve_twice_rejected() {
         site("VERIFY");
+        approvedRisk();
         Long approvalId = pendingApprovalOf(ApprovalTarget.PERMIT, submittedPermit(writer)).getId();
         approvalService.approve(approver, approvalId, null);
         expectCode(() -> approvalService.approve(siteAdmin, approvalId, null), ErrorCode.INVALID_STATE);
@@ -280,6 +290,7 @@ class ApprovalApiDbTest {
     @DisplayName("안내 모드: 자기 승인 허용, 결과에 자기 승인 표시")
     void guide_selfApproval_allowed() {
         site("GUIDE");
+        approvedRisk();
         Long permitId = submittedPermit(approver);
         Long approvalId = pendingApprovalOf(ApprovalTarget.PERMIT, permitId).getId();
 
@@ -293,6 +304,7 @@ class ApprovalApiDbTest {
     @DisplayName("결재선 2단계(검토 승인자 → 승인 현장 관리자): 1단계 뒤 대기 유지, 2단계는 현장 관리자만")
     void twoStepPolicy() {
         site("VERIFY");
+        approvedRisk();
         policyRepository.save(new ApprovalPolicy(siteId, ApprovalTarget.PERMIT, 1, "검토", ApproverRole.APPROVER, adminId));
         policyRepository.save(new ApprovalPolicy(siteId, ApprovalTarget.PERMIT, 2, "승인", ApproverRole.SITE_ADMIN, adminId));
         Long permitId = submittedPermit(writer);
@@ -333,6 +345,17 @@ class ApprovalApiDbTest {
 
         approvalService.approve(approver, permitApproval, null);
         assertThat(permitStatus(permitId)).isEqualTo(PermitStatus.APPROVED);
+    }
+
+    @Test
+    @DisplayName("작업에 위험성평가가 없으면 허가서를 최종 승인할 수 없다 (작업허가는 고위험 작업이라 필수)")
+    void permit_withoutRisk_cannotApprove() {
+        site("VERIFY");
+        Long permitId = submittedPermit(writer);
+        Long permitApproval = pendingApprovalOf(ApprovalTarget.PERMIT, permitId).getId();
+
+        expectCode(() -> approvalService.approve(approver, permitApproval, null), ErrorCode.INVALID_STATE);
+        assertThat(permitStatus(permitId)).isEqualTo(PermitStatus.PENDING);
     }
 
     @Test

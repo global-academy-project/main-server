@@ -23,8 +23,10 @@ import com.example.backend.site.entity.SiteMode;
 import com.example.backend.site.entity.SiteRole;
 import com.example.backend.site.repository.SiteMemberRepository;
 import com.example.backend.site.repository.SiteRepository;
+import com.example.backend.tbm.entity.TbmAttendee;
 import com.example.backend.tbm.entity.TbmRecord;
 import com.example.backend.tbm.entity.TbmWork;
+import com.example.backend.tbm.repository.TbmAttendeeRepository;
 import com.example.backend.tbm.repository.TbmRecordRepository;
 import com.example.backend.tbm.repository.TbmWorkRepository;
 import com.example.backend.user.entity.EmailVerifiedVia;
@@ -35,6 +37,15 @@ import com.example.backend.work.dto.CreateWorkRequest;
 import com.example.backend.work.entity.Work;
 import com.example.backend.work.repository.WorkRepository;
 import com.example.backend.work.service.WorkService;
+import com.example.backend.signature.entity.Signature;
+import com.example.backend.signature.entity.SignaturePurpose;
+import com.example.backend.signature.entity.SignatureTarget;
+import com.example.backend.signature.repository.SignatureRepository;
+import com.example.backend.worker.entity.EmploymentType;
+import com.example.backend.worker.entity.Worker;
+import com.example.backend.worker.entity.WorkerSite;
+import com.example.backend.worker.repository.WorkerRepository;
+import com.example.backend.worker.repository.WorkerSiteRepository;
 import jakarta.persistence.EntityManager;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -73,6 +84,10 @@ class DashboardDbTest {
     @Autowired WorkRepository workRepository;
     @Autowired TbmRecordRepository tbmRepository;
     @Autowired TbmWorkRepository tbmWorkRepository;
+    @Autowired TbmAttendeeRepository attendeeRepository;
+    @Autowired WorkerRepository workerRepository;
+    @Autowired WorkerSiteRepository workerSiteRepository;
+    @Autowired SignatureRepository signatureRepository;
     @Autowired CorrectiveActionRepository actionRepository;
     @Autowired NotificationRepository notificationRepository;
     @Autowired UserRepository userRepository;
@@ -120,6 +135,15 @@ class DashboardDbTest {
         Work w = workRepository.findById(workId).orElseThrow();
         tbmWorkRepository.saveAndFlush(TbmWork.of(t, w));
         return t.getId();
+    }
+
+    /** 그 현장에 배치된 작업자를 TBM 참석자로 등록 */
+    private Long attendee(Long tbmId) {
+        Long id = workerRepository.save(new Worker(null, "참석" + UUID.randomUUID().toString().substring(0, 4), null,
+                "배관공", EmploymentType.DIRECT)).getId();
+        workerSiteRepository.saveAndFlush(new WorkerSite(id, siteId, PAST.minusDays(30)));
+        attendeeRepository.saveAndFlush(TbmAttendee.of(tbmRepository.findById(tbmId).orElseThrow(), id, true));
+        return id;
     }
 
     // ------------------------------------------------------------------ 그날 현황
@@ -195,10 +219,12 @@ class DashboardDbTest {
     }
 
     @Test
-    @DisplayName("TBM 이 연결되면 TBM 미실시에서 빠지고, 실시 완료된 TBM 은 서명·사진 미완료로 잡힌다")
+    @DisplayName("TBM 이 연결되면 TBM 미실시에서 빠지고, 실시 완료된 TBM 은 서명(등록 참석자 기준)·사진 미완료로 잡힌다")
     void tbmHeld_signatureAndPhoto() {
         Long w = work(PAST, WorkType.GENERAL);
         Long tbmId = tbm(w, PAST, true);
+        attendee(tbmId);
+        attendee(tbmId);
 
         DashboardResponse d = dashboardService.day(adminId, siteId, PAST);
 
@@ -208,6 +234,23 @@ class DashboardDbTest {
             assertThat(e.detail()).isEqualTo("서명 0/2");
         });
         assertThat(item(d, IncompleteType.PHOTO_MISSING).count()).isEqualTo(1);
+    }
+
+    @Test
+    @DisplayName("등록 참석자가 모두 서명하면 서명 미완료에서 빠지고, 참석자 없이 인원만 적은 TBM 은 서명을 따지지 않는다")
+    void tbmSigned_orNoAttendees() {
+        Long tbmId = tbm(work(PAST, WorkType.GENERAL), PAST, true);
+        Long a = attendee(tbmId);
+        Long b = attendee(tbmId);
+        signatureRepository.saveAndFlush(Signature.byWorker(siteId, a, SignatureTarget.TBM, tbmId, SignaturePurpose.ATTENDEE,
+                "0".repeat(64), null, null));
+        assertThat(item(dashboardService.day(adminId, siteId, PAST), IncompleteType.SIGNATURE_MISSING).entries())
+                .singleElement().satisfies(e -> assertThat(e.detail()).isEqualTo("서명 1/2"));
+
+        signatureRepository.saveAndFlush(Signature.byWorker(siteId, b, SignatureTarget.TBM, tbmId, SignaturePurpose.ATTENDEE,
+                "0".repeat(64), null, null));
+        tbm(work(PAST, WorkType.GENERAL), PAST, true);   // 인원 2명만 적고 참석자 등록 없음
+        assertThat(item(dashboardService.day(adminId, siteId, PAST), IncompleteType.SIGNATURE_MISSING).count()).isZero();
     }
 
     @Test

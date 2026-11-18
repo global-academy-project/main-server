@@ -10,4 +10,11 @@ public interface AgentClient {
 
     /** 기록 질문 (RECORD_QUERY). 응답 모양은 RecordQueryData */
     AgentReply recordQuery(RecordQueryCall call);
+
+    /**
+     * 감사보고서 요약·수치 검증 (ai-model POST /api/v1/agent/audit-report).
+     * body 는 ai-model AuditReportInput 모양 (reportId, siteId, dateFrom, dateTo, items[{queryType, title, stats, records, evidence}]).
+     * 응답 data 는 AuditReportResult (status, items[{queryType, title, summary, verification}], overallVerification)
+     */
+    AgentReply auditReport(java.util.Map<String, Object> body);
 }
