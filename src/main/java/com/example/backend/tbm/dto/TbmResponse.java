@@ -23,6 +23,10 @@ public record TbmResponse(Long tbmId, Long siteId, LocalDate tbmDate, LocalDateT
     public record WorkRef(Long workId, String title) {
     }
 
-    public record Attendee(Long workerId, String name, Boolean healthOk) {
+    /**
+     * 참석자. signedAt: 참석 서명 시각(없으면 서명 전).
+     * signatureChanged: 서명한 뒤 TBM 내용(날짜·실시 시각·진행자·교육 요점·건강 확인·작업·참석자)이 바뀌었으면 true, 서명 전이면 null
+     */
+    public record Attendee(Long workerId, String name, Boolean healthOk, LocalDateTime signedAt, Boolean signatureChanged) {
     }
 }

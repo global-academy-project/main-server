@@ -6,6 +6,7 @@ import com.example.backend.common.exception.BusinessException;
 import com.example.backend.common.exception.ErrorCode;
 import com.example.backend.permit.entity.Permit;
 import com.example.backend.permit.repository.PermitRepository;
+import com.example.backend.risk.entity.RiskAssessment;
 import com.example.backend.risk.entity.RiskStatus;
 import com.example.backend.risk.repository.RiskAssessmentRepository;
 import org.springframework.stereotype.Component;
@@ -41,12 +42,14 @@ public class PermitApprovalHandler implements ApprovalTargetHandler {
     @Override
     public void checkBeforeFinalApprove(Long permitId) {
         Permit permit = load(permitId);
-        riskRepository.findTopByWorkIdOrderByRevisionDesc(permit.getWorkId()).ifPresent(risk -> {
-            if (risk.getStatus() != RiskStatus.APPROVED) {
-                throw new BusinessException(ErrorCode.INVALID_STATE,
-                        "이 작업의 위험성평가가 승인된 뒤에 작업허가를 승인할 수 있습니다 (현재 위험성평가 " + risk.getStatus() + ").");
-            }
-        });
+        // 작업허가(화기·밀폐·고소)는 고위험 작업이라 위험성평가가 반드시 있어야 하고, 최신 판이 승인돼 있어야 한다
+        RiskAssessment risk = riskRepository.findTopByWorkIdOrderByRevisionDesc(permit.getWorkId())
+                .orElseThrow(() -> new BusinessException(ErrorCode.INVALID_STATE,
+                        "이 작업의 위험성평가가 없습니다. 위험성평가를 작성해 승인받은 뒤에 작업허가를 승인할 수 있습니다."));
+        if (risk.getStatus() != RiskStatus.APPROVED) {
+            throw new BusinessException(ErrorCode.INVALID_STATE,
+                    "이 작업의 위험성평가가 승인된 뒤에 작업허가를 승인할 수 있습니다 (현재 위험성평가 " + risk.getStatus() + ").");
+        }
     }
 
     @Override

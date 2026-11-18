@@ -115,6 +115,13 @@ class RecordSearchDbTest {
     /** 측정·판정 흐름을 건너뛰고 승인까지 (예전 기록·시연용 가상 기록처럼 측정값 없이 승인된 허가 만들기) */
     private Approval approveDirectly(Long permitId) {
         em.flush();
+        // 작업허가 최종 승인에는 그 작업의 승인된 위험성평가가 필요하다
+        Long workId = ((Number) em.createNativeQuery("SELECT work_id FROM permits WHERE id = ?1")
+                .setParameter(1, permitId).getSingleResult()).longValue();
+        RiskAssessment risk = RiskAssessment.daily(siteId, workId, DAY, userId);
+        risk.submit();
+        risk.approve();
+        riskRepository.saveAndFlush(risk);
         em.createNativeQuery("UPDATE permits SET status = 'PENDING' WHERE id = ?1").setParameter(1, permitId).executeUpdate();
         em.clear();
         Approval a = approvalService.request(ApprovalTarget.PERMIT, permitId, siteId, userId);

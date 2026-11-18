@@ -108,6 +108,10 @@ class PreviewDbTest {
     @Test
     @DisplayName("승인 대기: 결재에서 열면 '승인 전 미리보기', 승인 후에는 표시 없는 정식 문서와 결재 정보")
     void pendingThenApproved() {
+        RiskAssessment risk = RiskAssessment.daily(siteId, workId, DAY, userId);   // 작업허가 최종 승인에 필요
+        risk.submit();
+        risk.approve();
+        riskRepository.saveAndFlush(risk);
         Long permitId = hotPermit();
         submit(permitId);
         Long approvalId = approvalRepository.findByTargetTypeAndTargetIdAndStatus(ApprovalTarget.PERMIT, permitId,

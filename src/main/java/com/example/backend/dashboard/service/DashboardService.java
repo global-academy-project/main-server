@@ -310,9 +310,14 @@ public class DashboardService {
                 continue;
             }
             String title = t.getTbmDate() + " TBM";
-            int need = t.getAttendeeCount() != null ? t.getAttendeeCount() : attendeeRepository.countByTbmId(t.getId());
-            long signed = signatureRepository.countByTargetTypeAndTargetIdAndPurpose(SignatureTarget.TBM, t.getId(),
-                    SignaturePurpose.ATTENDEE);
+            // 서명은 등록된 참석자만 할 수 있으므로, 등록 참석자 중 서명한 사람 수로 센다
+            // (인원만 적고 참석자를 등록하지 않은 TBM 은 받을 서명이 없어 세지 않는다)
+            Set<Long> attendees = attendeeRepository.findByTbmId(t.getId()).stream()
+                    .map(a -> a.getWorkerId()).collect(Collectors.toSet());
+            int need = attendees.size();
+            long signed = signatureRepository.findByTargetTypeAndTargetIdOrderBySignedAtAscIdAsc(SignatureTarget.TBM, t.getId())
+                    .stream().filter(sig -> sig.getPurpose() == SignaturePurpose.ATTENDEE && attendees.contains(sig.getWorkerId()))
+                    .map(sig -> sig.getWorkerId()).distinct().count();
             if (need > 0 && signed < need) {
                 add(entries, t.getTbmDate(), IncompleteType.SIGNATURE_MISSING,
                         new Entry("TBM", t.getId(), title, null, "서명 " + signed + "/" + need, null, false));

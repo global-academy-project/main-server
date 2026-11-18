@@ -34,6 +34,7 @@ public class FastApiAgentClient implements AgentClient {
 
     static final String WORK_REGISTER_PATH = "/api/v1/agent/work-register";
     static final String RECORD_QUERY_PATH = "/api/v1/agent/record-query";
+    static final String AUDIT_REPORT_PATH = "/api/v1/agent/audit-report";
     private static final Logger log = LoggerFactory.getLogger(FastApiAgentClient.class);
 
     private final RestClient restClient;
@@ -78,6 +79,11 @@ public class FastApiAgentClient implements AgentClient {
         body.put("context", call.context());
         body.put("mode", call.mode());
         return post(RECORD_QUERY_PATH, body);
+    }
+
+    @Override
+    public AgentReply auditReport(Map<String, Object> body) {
+        return post(AUDIT_REPORT_PATH, body);
     }
 
     private AgentReply post(String path, Map<String, Object> body) {

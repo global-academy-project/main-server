@@ -7,6 +7,10 @@ import com.example.backend.common.exception.BusinessException;
 import com.example.backend.common.exception.ErrorCode;
 import com.example.backend.site.entity.WorkZone;
 import com.example.backend.site.repository.WorkZoneRepository;
+import com.example.backend.signature.entity.Signature;
+import com.example.backend.signature.entity.SignaturePurpose;
+import com.example.backend.signature.entity.SignatureTarget;
+import com.example.backend.signature.repository.SignatureRepository;
 import com.example.backend.site.service.SiteGuard;
 import com.example.backend.tbm.dto.TbmResponse;
 import com.example.backend.tbm.entity.TbmAttendee;
@@ -27,6 +31,9 @@ import tools.jackson.core.JacksonException;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.json.JsonMapper;
 
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.time.Clock;
 import java.time.LocalDate;
 import java.util.ArrayList;
@@ -50,12 +57,14 @@ public class TbmService {
     private final SiteGuard siteGuard;
     private final JsonMapper jsonMapper;
     private final Clock clock;
+    private final SignatureRepository signatureRepository;
 
     public TbmService(TbmRecordRepository tbmRepository, TbmWorkRepository tbmWorkRepository,
                       TbmAttendeeRepository attendeeRepository, WorkRepository workRepository,
                       WorkerRepository workerRepository, TeamRepository teamRepository,
                       WorkZoneRepository zoneRepository, ApprovalRepository approvalRepository,
-                      SiteGuard siteGuard, JsonMapper jsonMapper, Clock clock) {
+                      SiteGuard siteGuard, JsonMapper jsonMapper, Clock clock,
+                      SignatureRepository signatureRepository) {
         this.tbmRepository = tbmRepository;
         this.tbmWorkRepository = tbmWorkRepository;
         this.attendeeRepository = attendeeRepository;
@@ -67,6 +76,7 @@ public class TbmService {
         this.siteGuard = siteGuard;
         this.jsonMapper = jsonMapper;
         this.clock = clock;
+        this.signatureRepository = signatureRepository;
     }
 
     @Transactional(readOnly = true)
@@ -105,8 +115,13 @@ public class TbmService {
         List<TbmAttendee> attendees = attendeeRepository.findByTbmId(tbm.getId());
         Map<Long, String> names = workerRepository.findAllById(attendees.stream().map(TbmAttendee::getWorkerId).toList())
                 .stream().collect(Collectors.toMap(Worker::getId, Worker::getName));
-        List<TbmResponse.Attendee> people = attendees.stream()
-                .map(a -> new TbmResponse.Attendee(a.getWorkerId(), names.get(a.getWorkerId()), a.getHealthOk())).toList();
+        Map<Long, Signature> signed = attendeeSignatures(tbm.getId());
+        String hash = signed.isEmpty() ? null : contentHash(tbm);
+        List<TbmResponse.Attendee> people = attendees.stream().map(a -> {
+            Signature sig = signed.get(a.getWorkerId());
+            return new TbmResponse.Attendee(a.getWorkerId(), names.get(a.getWorkerId()), a.getHealthOk(),
+                    sig == null ? null : sig.getSignedAt(), sig == null ? null : !sig.matches(hash));
+        }).toList();
 
         Team team = tbm.getTeamId() == null ? null : teamRepository.findById(tbm.getTeamId()).orElse(null);
         WorkZone zone = tbm.getZoneId() == null ? null : zoneRepository.findById(tbm.getZoneId()).orElse(null);
@@ -118,6 +133,40 @@ public class TbmService {
                 tbm.getWriterId(), tbm.getAgentRunId(), tbm.getLockVersion(),
                 tbm.getTeamId(), team == null ? null : team.getName(), tbm.getZoneId(), zone == null ? null : zone.getName(),
                 approval == null ? null : approval.getId(), approval == null ? null : approval.getStatus(), workRefs, people);
+    }
+
+    /** 참석자 서명 (작업자별 가장 이른 것. 같은 자격 두 번 서명은 DB 가 막는다) */
+    Map<Long, Signature> attendeeSignatures(Long tbmId) {
+        Map<Long, Signature> map = new java.util.HashMap<>();
+        for (Signature sig : signatureRepository.findByTargetTypeAndTargetIdOrderBySignedAtAscIdAsc(SignatureTarget.TBM, tbmId)) {
+            if (sig.getPurpose() == SignaturePurpose.ATTENDEE && sig.getWorkerId() != null) {
+                map.putIfAbsent(sig.getWorkerId(), sig);
+            }
+        }
+        return map;
+    }
+
+    /**
+     * 서명 대상 내용 해시 (소문자 SHA-256). 날짜·실시 시각·진행자·교육 요점·건강 확인·작업·참석자가 같으면 같은 값.
+     * 서명 때 저장하고, 조회 때 다시 계산해 다르면 "서명 후 내용 변경"으로 보여 준다.
+     */
+    public String contentHash(TbmRecord tbm) {
+        List<Long> workIds = tbmWorkRepository.findByTbmId(tbm.getId()).stream().map(TbmWork::getWorkId).sorted().toList();
+        List<String> people = attendeeRepository.findByTbmId(tbm.getId()).stream()
+                .map(a -> a.getWorkerId() + ":" + a.getHealthOk()).sorted().toList();
+        String text = String.join("\n", "tbm=" + tbm.getId(), "date=" + tbm.getTbmDate(), "heldAt=" + tbm.getHeldAt(),
+                "leader=" + tbm.getLeaderName(), "points=" + tbm.getEducationPoints(), "health=" + tbm.getHealthCheck(),
+                "works=" + workIds, "attendees=" + people);
+        try {
+            byte[] digest = MessageDigest.getInstance("SHA-256").digest(text.getBytes(StandardCharsets.UTF_8));
+            StringBuilder hex = new StringBuilder(64);
+            for (byte b : digest) {
+                hex.append(String.format("%02x", b));
+            }
+            return hex.toString();
+        } catch (NoSuchAlgorithmException e) {
+            throw new IllegalStateException("SHA-256 을 쓸 수 없습니다.", e);
+        }
     }
 
     /** 교육 요점: JSON 배열 문자열 → 목록. 배열이 아니면(직접 쓴 글) 원문 한 줄 */

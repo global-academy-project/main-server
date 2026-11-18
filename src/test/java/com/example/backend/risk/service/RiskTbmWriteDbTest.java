@@ -23,6 +23,7 @@ import com.example.backend.tbm.dto.TbmResponse;
 import com.example.backend.tbm.entity.TbmStatus;
 import com.example.backend.tbm.service.TbmCommandService;
 import com.example.backend.tbm.service.TbmService;
+import com.example.backend.tbm.service.TbmSignatureService;
 import com.example.backend.user.entity.User;
 import com.example.backend.user.repository.UserRepository;
 import com.example.backend.work.dto.CreateWorkRequest;
@@ -62,6 +63,7 @@ class RiskTbmWriteDbTest {
     @Autowired RiskAssessmentService riskService;
     @Autowired TbmCommandService tbmService;
     @Autowired TbmService tbmQuery;
+    @Autowired TbmSignatureService signService;
     @Autowired ApprovalService approvalService;
     @Autowired ApprovalRepository approvalRepository;
     @Autowired WorkService workService;
@@ -249,6 +251,37 @@ class RiskTbmWriteDbTest {
 
         approvalService.approve(userId, pendingApproval(ApprovalTarget.TBM, t.tbmId()), null);
         expectCode(() -> tbmService.reopen(userId, t.tbmId()), ErrorCode.INVALID_STATE);
+    }
+
+    @Test
+    @DisplayName("참석자 서명: 실시 완료 후 등록 참석자만 한 번, 되돌려 내용을 고치면 서명 후 변경으로 표시")
+    void attendeeSignatures() {
+        Long w1 = worker(true);
+        Long w2 = worker(true);
+        Long outsider = worker(true);
+        TbmResponse t = tbmService.create(userId, siteId, tbm(DAY, List.of(workId), List.of(w1, w2), null));
+        expectCode(() -> signService.sign(userId, t.tbmId(), w1, "127.0.0.1"), ErrorCode.INVALID_STATE);   // 실시 전
+
+        TbmResponse done = tbmService.complete(userId, t.tbmId(), new CompleteTbmRequest(t.lockVersion(), DAY.atTime(8, 30), null));
+        TbmResponse signed = signService.sign(userId, t.tbmId(), w1, "127.0.0.1");
+        assertThat(signed.attendees()).filteredOn(a -> a.workerId().equals(w1)).singleElement().satisfies(a -> {
+            assertThat(a.signedAt()).isNotNull();
+            assertThat(a.signatureChanged()).isFalse();
+        });
+        assertThat(signed.attendees()).filteredOn(a -> a.workerId().equals(w2)).singleElement()
+                .satisfies(a -> assertThat(a.signedAt()).isNull());
+        expectCode(() -> signService.sign(userId, t.tbmId(), w1, null), ErrorCode.INVALID_STATE);         // 두 번
+        expectCode(() -> signService.sign(userId, t.tbmId(), outsider, null), ErrorCode.INVALID_REQUEST); // 참석자 아님
+        assertThat(historyRepository.findByTargetTypeAndTargetIdOrderByCreatedAtAscIdAsc(HistoryTarget.TBM, t.tbmId()))
+                .anyMatch(h -> h.getAction() == HistoryAction.SIGN);
+
+        TbmResponse reopened = tbmService.reopen(userId, t.tbmId());
+        TbmResponse changed = tbmService.update(userId, t.tbmId(), new SaveTbmRequest(DAY, null, null, "이반장",
+                List.of("가스측정 결과 확인", "화재감시자 지정", "추가 교육"), null, List.of(workId),
+                List.of(new SaveTbmRequest.Attendee(w1, true), new SaveTbmRequest.Attendee(w2, true)), reopened.lockVersion()));
+        assertThat(changed.attendees()).filteredOn(a -> a.workerId().equals(w1)).singleElement()
+                .satisfies(a -> assertThat(a.signatureChanged()).isTrue());
+        assertThat(done.status()).isEqualTo(TbmStatus.DONE);
     }
 
     @Test

@@ -4,9 +4,12 @@ import com.example.backend.common.response.ApiResponse;
 import com.example.backend.tbm.dto.CompleteTbmRequest;
 import com.example.backend.tbm.dto.SaveTbmAttendeesRequest;
 import com.example.backend.tbm.dto.SaveTbmRequest;
+import com.example.backend.tbm.dto.SignTbmRequest;
 import com.example.backend.tbm.dto.TbmResponse;
 import com.example.backend.tbm.service.TbmCommandService;
 import com.example.backend.tbm.service.TbmService;
+import com.example.backend.tbm.service.TbmSignatureService;
+import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
 import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.http.HttpStatus;
@@ -23,10 +26,12 @@ public class TbmController {
 
     private final TbmService tbmService;
     private final TbmCommandService commandService;
+    private final TbmSignatureService signatureService;
 
-    public TbmController(TbmService tbmService, TbmCommandService commandService) {
+    public TbmController(TbmService tbmService, TbmCommandService commandService, TbmSignatureService signatureService) {
         this.tbmService = tbmService;
         this.commandService = commandService;
+        this.signatureService = signatureService;
     }
 
     @GetMapping("/tbm/{tbmId}")
@@ -77,6 +82,14 @@ public class TbmController {
     @PostMapping("/tbm/{tbmId}/reopen")
     public ApiResponse<TbmResponse> reopen(@AuthenticationPrincipal Long userId, @PathVariable Long tbmId) {
         return ApiResponse.ok(commandService.reopen(userId, tbmId));
+    }
+
+    /** 참석자 서명 (실시 완료 후, 확인 전까지. 한 사람 한 번, 지울 수 없음) */
+    @PostMapping("/tbm/{tbmId}/signatures")
+    @ResponseStatus(HttpStatus.CREATED)
+    public ApiResponse<TbmResponse> sign(@AuthenticationPrincipal Long userId, @PathVariable Long tbmId,
+                                         @Valid @RequestBody SignTbmRequest request, HttpServletRequest http) {
+        return ApiResponse.ok(signatureService.sign(userId, tbmId, request.workerId(), http.getRemoteAddr()));
     }
 
     /** 확인 요청 (실시 완료 후) → 승인함 */
