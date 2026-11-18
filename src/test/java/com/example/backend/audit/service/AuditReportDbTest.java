@@ -8,6 +8,9 @@ import com.example.backend.common.exception.ErrorCode;
 import com.example.backend.corrective.dto.SaveCorrectiveActionRequest;
 import com.example.backend.corrective.entity.ActionSource;
 import com.example.backend.corrective.service.CorrectiveActionService;
+import com.example.backend.history.entity.AccessAction;
+import com.example.backend.history.entity.AccessResource;
+import com.example.backend.history.repository.RecordAccessLogRepository;
 import com.example.backend.site.entity.Site;
 import com.example.backend.site.entity.SiteMember;
 import com.example.backend.site.entity.SiteMode;
@@ -44,6 +47,7 @@ class AuditReportDbTest {
     @Autowired UserRepository userRepository;
     @Autowired SiteRepository siteRepository;
     @Autowired SiteMemberRepository siteMemberRepository;
+    @Autowired RecordAccessLogRepository accessLogRepository;
 
     private Long adminId;
     private Long writer;
@@ -70,6 +74,10 @@ class AuditReportDbTest {
         AuditReportResponse created = service.create(adminId, siteId, new CreateAuditReportRequest(today.minusDays(7), today,
                 List.of("corrective_action_rate", "risk_assessment_rate")));
         assertThat(created.status()).isEqualTo(AuditReportStatus.GENERATING);
+        assertThat(created.summaryRetryable()).isFalse();   // 막 시작한 요약은 다시 하기 불가
+        service.get(adminId, siteId, created.reportId());   // 요약 중 화면이 다시 조회 (만들 때 남긴 로그가 있어 열람 로그 안 남김)
+        service.get(adminId, siteId, created.reportId());
+        assertThat(views(created.reportId())).isZero();
         expectCode(() -> service.update(adminId, siteId, created.reportId(), new UpdateAuditReportRequest("x", null, List.of(),
                 created.lockVersion())), ErrorCode.INVALID_STATE);   // 요약 중에는 못 고침
         expectCode(() -> service.retrySummary(adminId, siteId, created.reportId()), ErrorCode.INVALID_STATE);
@@ -78,6 +86,8 @@ class AuditReportDbTest {
         AuditReportResponse r = service.get(adminId, siteId, created.reportId());
 
         assertThat(r.status()).isEqualTo(AuditReportStatus.DRAFT);
+        assertThat(r.summaryRetryable()).isFalse();
+        assertThat(views(created.reportId())).isEqualTo(1);   // 요약이 끝난 뒤 연 것은 남긴다
         assertThat(r.statusLabel()).isEqualTo("초안");
         assertThat(r.queryTypes()).containsExactly("risk_assessment_rate", "corrective_action_rate");
         assertThat(r.items()).hasSize(2);
@@ -110,5 +120,12 @@ class AuditReportDbTest {
                 List.of("blocked_records", "blocked_records"))), ErrorCode.INVALID_REQUEST);
         expectCode(() -> service.create(adminId, siteId, new CreateAuditReportRequest(today, today.minusDays(1),
                 List.of("blocked_records"))), ErrorCode.INVALID_REQUEST);
+    }
+
+    private long views(Long reportId) {
+        return accessLogRepository.findAll().stream()
+                .filter(l -> l.getResourceType() == AccessResource.AUDIT_REPORT && reportId.equals(l.getResourceId())
+                        && l.getAction() == AccessAction.VIEW && adminId.equals(l.getUserId()))
+                .count();
     }
 }
