@@ -77,3 +77,8 @@ Content-Type: application/json
 ### 12. 상세 조회 (측정 2건, 최근 판정 PASS)
 GET {{host}}/api/v1/permits/{{permitId}}
 Authorization: Bearer {{token}}
+
+### 반려된 허가서에서 새 판 (반려된 허가만. 내용 복사, revision + 1, 작성 중. 이전 판은 SUPERSEDED)
+### 승인함에서 반려(reject)한 뒤 호출. 반려가 아니면 409 INVALID_STATE
+POST {{host}}/api/v1/permits/{{permitId}}/revise
+Authorization: Bearer {{token}}

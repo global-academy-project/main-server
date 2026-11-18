@@ -1,6 +1,12 @@
 package com.example.backend.permit.service;
 
+import com.example.backend.approval.entity.ApprovalStatus;
+import com.example.backend.approval.entity.ApprovalTarget;
+import com.example.backend.approval.repository.ApprovalRepository;
+import com.example.backend.approval.service.ApprovalService;
 import com.example.backend.common.exception.ErrorCode;
+import com.example.backend.history.entity.HistoryTarget;
+import com.example.backend.history.repository.RecordHistoryRepository;
 import com.example.backend.permit.dto.AddMeasurementsRequest;
 import com.example.backend.permit.dto.CreatePermitRequest;
 import com.example.backend.permit.dto.PermitCheckResponse;
@@ -49,6 +55,9 @@ class PermitFlowIntegrationTest {
     @Autowired PermitService permitService;
     @Autowired WorkService workService;
     @Autowired UserRepository userRepository;
+    @Autowired ApprovalService approvalService;
+    @Autowired ApprovalRepository approvalRepository;
+    @Autowired RecordHistoryRepository historyRepository;
     @Autowired EntityManager em;
 
     private Long adminId;
@@ -59,7 +68,8 @@ class PermitFlowIntegrationTest {
         User admin = userRepository.save(User.bootstrapAdmin(
                 "permit-test-" + UUID.randomUUID() + "@example.com", "HASH", LocalDateTime.now()));
         adminId = admin.getId();
-        em.createNativeQuery("INSERT INTO sites (name) VALUES (?1)").setParameter(1, "테스트현장-" + UUID.randomUUID()).executeUpdate();
+        em.createNativeQuery("INSERT INTO sites (name, mode) VALUES (?1, 'GUIDE')").setParameter(1, "테스트현장-" + UUID.randomUUID()).executeUpdate();
+        // 안내 모드(GUIDE): 요청자가 자기 문서를 승인·반려할 수 있다 (검증 모드는 불가)
         Long siteId = ((Number) em.createNativeQuery("SELECT LAST_INSERT_ID()").getSingleResult()).longValue();
         WorkResponse work = workService.create(adminId, new CreateWorkRequest(siteId, LocalDate.of(2026, 10, 29),
                 "R-201 하부 배관 플랜지 볼트 교체", "고착 시 그라인더 절단", WorkType.HOT, FROM, TO, 3));
@@ -192,6 +202,47 @@ class PermitFlowIntegrationTest {
         assertThat(updated.watcherName()).isEqualTo("새감시");
         assertThat(updated.lastEvaluation()).isNull();
         assertThat(updated.canSubmit()).isFalse();
+    }
+
+    @Test
+    @DisplayName("반려되면 새 판(2판): 번호·양식 복사, 측정·판정은 비움, 이전 판은 SUPERSEDED, 새 판에서 다시 승인 요청")
+    void rejectThenRevise() {
+        PermitResponse first = createHotPermit();
+        Long id = first.permitId();
+        expectCode(() -> permitService.revise(adminId, id), ErrorCode.INVALID_STATE);   // 작성 중
+
+        measureLel(id, "3", FROM.minusHours(1));
+        assertThat(permitService.check(adminId, id).canSubmit()).isTrue();
+        permitService.submit(adminId, id);
+        expectCode(() -> permitService.revise(adminId, id), ErrorCode.INVALID_STATE);   // 승인 대기
+
+        Long approvalId = approvalRepository.findByTargetTypeAndTargetIdAndStatus(ApprovalTarget.PERMIT, id,
+                ApprovalStatus.PENDING).orElseThrow().getId();
+        approvalService.reject(adminId, approvalId, "감시자 보강", List.of("감시자"));
+        assertThat(permitService.get(adminId, id).status()).isEqualTo(PermitStatus.REJECTED);
+
+        PermitResponse next = permitService.revise(adminId, id);
+        assertThat(next.permitId()).isNotEqualTo(id);
+        assertThat(next.revision()).isEqualTo(2);
+        assertThat(next.permitNo()).isEqualTo(first.permitNo());
+        assertThat(next.status()).isEqualTo(PermitStatus.DRAFT);
+        assertThat(next.watcherName()).isEqualTo("김감시");
+        assertThat(next.form()).containsEntry("extinguisher_ready", true);
+        assertThat(next.measurements()).isEmpty();
+        assertThat(next.lastEvaluation()).isNull();
+        assertThat(next.canSubmit()).isFalse();
+        assertThat(permitService.get(adminId, id).status()).isEqualTo(PermitStatus.SUPERSEDED);
+        assertThat(historyRepository.findAll()).anySatisfy(h -> {
+            assertThat(h.getTargetType()).isEqualTo(HistoryTarget.PERMIT);
+            assertThat(h.getTargetId()).isEqualTo(next.permitId());
+        });
+        expectCode(() -> permitService.revise(adminId, id), ErrorCode.INVALID_STATE);   // 이미 대체됨
+        expectCode(() -> permitService.submit(adminId, next.permitId()), ErrorCode.INVALID_STATE);   // 판정 먼저
+
+        // 새 판에서 다시 측정·판정·승인 요청
+        measureLel(next.permitId(), "2", FROM.minusMinutes(30));
+        assertThat(permitService.check(adminId, next.permitId()).canSubmit()).isTrue();
+        assertThat(permitService.submit(adminId, next.permitId()).status()).isEqualTo(PermitStatus.PENDING);
     }
 
     @Test

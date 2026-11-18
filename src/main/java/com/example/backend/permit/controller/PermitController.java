@@ -14,7 +14,7 @@ import org.springframework.web.bind.annotation.*;
 
 /**
  * 작업허가 (화기·밀폐·고소). 로그인 + 그 현장 권한 필요.
- * 흐름: 작성 → 측정값 → 판정(check) → 승인 요청(submit)
+ * 흐름: 작성 → 측정값 → 판정(check) → 승인 요청(submit). 반려되면 새 판(revise)
  */
 @RestController
 @RequestMapping("/api/v1/permits")
@@ -43,6 +43,13 @@ public class PermitController {
     public ApiResponse<PermitResponse> update(@AuthenticationPrincipal Long userId, @PathVariable Long permitId,
                                               @Valid @RequestBody UpdatePermitRequest request) {
         return ApiResponse.ok(permitService.update(userId, permitId, request));
+    }
+
+    /** 반려된 허가서에서 새 판 (내용 복사, 작성 중). 이전 판은 SUPERSEDED. 반려 아니면 409 INVALID_STATE */
+    @PostMapping("/{permitId}/revise")
+    @ResponseStatus(HttpStatus.CREATED)
+    public ApiResponse<PermitResponse> revise(@AuthenticationPrincipal Long userId, @PathVariable Long permitId) {
+        return ApiResponse.ok(permitService.revise(userId, permitId));
     }
 
     @PostMapping("/{permitId}/measurements")
