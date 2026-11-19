@@ -7,6 +7,7 @@ import com.example.backend.history.entity.HistoryTarget;
 import com.example.backend.history.entity.RecordHistory;
 import com.example.backend.history.repository.RecordHistoryRepository;
 import com.example.backend.nearmiss.entity.NearMiss;
+import com.example.backend.nearmiss.entity.NearMissStatus;
 import com.example.backend.nearmiss.repository.NearMissRepository;
 import com.example.backend.notification.entity.Notification;
 import com.example.backend.notification.entity.NotificationRecipient;
@@ -50,8 +51,11 @@ import java.util.stream.Collectors;
  * <ul>
  *   <li>아차사고 보고 → 같은 구역의 오늘 이후 작업(완료·취소 제외)에 경고, 작성자에게 알림</li>
  *   <li>구역을 정해 작업 등록 → 그 구역의 최근 아차사고(현장 설정 near_miss_warn_days 일)로 경고</li>
- *   <li>중대도 태그가 중상·사망(SERIOUS·FATAL)이면 긴급(CRITICAL, 확인에 조치 내용 필수), 아니면 WARN</li>
- *   <li>같은 아차사고로 같은 작업에 한 번만 (DB uk_ww_nm). 경고 내용은 바꾸지 않고 확인만 한 번 남긴다</li>
+ *   <li>사람이 저장한 중대도 태그가 중상·사망(SERIOUS·FATAL)이면 긴급(CRITICAL, 확인에 조치 내용 필수), 아니면 WARN.
+ *       AI 자동 태깅(보고 상태 REPORTED 의 제안)은 등급에 쓰지 않는다</li>
+ *   <li>보고 직후에는 태그가 없어 WARN 으로 만들어진다. 나중에 사람이 중상·사망으로 저장하면 이 아차사고의
+ *       확인하지 않은 경고를 CRITICAL 로 올리고 작업 작성자에게 다시 알린다 (이미 확인한 경고는 그대로)</li>
+ *   <li>같은 아차사고로 같은 작업에 한 번만 (DB uk_ww_nm). 문구는 바꾸지 않고 확인은 한 번 남긴다</li>
  *   <li>확인하지 않은 경고가 있으면 작업허가 승인 요청을 막는다 (PermitService)</li>
  * </ul>
  */
@@ -114,7 +118,7 @@ public class WorkWarningService {
                 continue;
             }
             warningRepository.save(WorkWarning.fromNearMiss(w.getSiteId(), w.getId(), n.getId(), severity, message));
-            notifyWriter(w, n, severity, message, now);
+            notifyWriter(w, n, severity, message, now, "");
             count++;
         }
         warningRepository.flush();
@@ -136,6 +140,26 @@ public class WorkWarningService {
                 continue;
             }
             warningRepository.save(WorkWarning.fromNearMiss(w.getSiteId(), w.getId(), n.getId(), severityOf(n), message(n)));
+            count++;
+        }
+        warningRepository.flush();
+        return count;
+    }
+
+    /** 사람이 아차사고 태그를 저장한 직후: 중상·사망이면 확인하지 않은 경고를 긴급으로 올리고 작성자에게 알림. 올린 수 */
+    @Transactional
+    public int escalateFromNearMiss(NearMiss n) {
+        if (severityOf(n) != WarningSeverity.CRITICAL) {
+            return 0;
+        }
+        LocalDateTime now = LocalDateTime.now(clock);
+        int count = 0;
+        for (WorkWarning x : warningRepository.findByNearMissIdAndAcknowledgedAtIsNullOrderByIdAsc(n.getId())) {
+            if (!x.escalateToCritical()) {
+                continue;
+            }
+            workRepository.findById(x.getWorkId()).ifPresent(w ->
+                    notifyWriter(w, n, WarningSeverity.CRITICAL, x.getMessage(), now, ":CRITICAL"));
             count++;
         }
         warningRepository.flush();
@@ -180,7 +204,11 @@ public class WorkWarningService {
 
     // ------------------------------------------------------------------ 내부
 
+    /** 사람이 저장한 태그로만 정한다: 보고 직후(REPORTED)의 태그는 AI 제안이라 WARN */
     private WarningSeverity severityOf(NearMiss n) {
+        if (n.getStatus() == NearMissStatus.REPORTED) {
+            return WarningSeverity.WARN;
+        }
         boolean critical = tagRepository.findByRecordTypeAndRecordIdOrderByAxisAscIdAsc(RecordType.NEAR_MISS, n.getId()).stream()
                 .anyMatch(t -> t.getAxis() == TagAxis.SEVERITY && CRITICAL_SEVERITY.contains(t.getValue()));
         return critical ? WarningSeverity.CRITICAL : WarningSeverity.WARN;
@@ -196,15 +224,17 @@ public class WorkWarningService {
         return text.length() <= 500 ? text : text.substring(0, 500);
     }
 
-    private void notifyWriter(Work w, NearMiss n, WarningSeverity severity, String message, LocalDateTime now) {
+    /** keySuffix: 같은 작업·아차사고 알림 중복 막기 키 뒤에 붙임 (긴급으로 올린 알림은 ":CRITICAL" 로 따로 한 번) */
+    private void notifyWriter(Work w, NearMiss n, WarningSeverity severity, String message, LocalDateTime now,
+                              String keySuffix) {
         if (w.getWriterId() == null || w.getWriterId().equals(n.getReporterId())) {
             return;
         }
-        String key = "NEAR_MISS_WARNING:" + n.getId() + ":WORK:" + w.getId();
+        String key = "NEAR_MISS_WARNING:" + n.getId() + ":WORK:" + w.getId() + keySuffix;
         if (notificationRepository.findByDedupeKey(key).isPresent()) {
             return;
         }
-        String title = "같은 구역 아차사고 · " + w.getTitle();
+        String title = (keySuffix.isEmpty() ? "같은 구역 아차사고 · " : "긴급 · 같은 구역 아차사고 · ") + w.getTitle();
         Notification saved = notificationRepository.save(Notification.of(w.getSiteId(), NotificationType.NEAR_MISS_WARNING,
                         severity == WarningSeverity.CRITICAL ? NotificationSeverity.CRITICAL : NotificationSeverity.WARN,
                         title.length() <= 100 ? title : title.substring(0, 100), message, now)

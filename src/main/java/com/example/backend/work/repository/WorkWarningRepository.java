@@ -12,6 +12,9 @@ public interface WorkWarningRepository extends JpaRepository<WorkWarning, Long> 
     /** 아직 확인하지 않은 경고 (승인 요청 전에 확인 필요) */
     List<WorkWarning> findByWorkIdAndAcknowledgedAtIsNullOrderByIdAsc(Long workId);
 
+    /** 이 아차사고로 만든 경고 중 아직 확인하지 않은 것 (중대도 확정 뒤 긴급으로 올리기) */
+    List<WorkWarning> findByNearMissIdAndAcknowledgedAtIsNullOrderByIdAsc(Long nearMissId);
+
     /** 같은 아차사고로 이미 경고했나 (DB uk_ww_nm) */
     boolean existsByWorkIdAndNearMissId(Long workId, Long nearMissId);
 }

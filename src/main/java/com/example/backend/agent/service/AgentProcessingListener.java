@@ -8,7 +8,9 @@ import com.example.backend.agent.client.WorkRegisterCall;
 import com.example.backend.agent.entity.AgentRun;
 import com.example.backend.agent.entity.AgentRunStatus;
 import com.example.backend.agent.repository.AgentRunRepository;
+import com.example.backend.agent.entity.AgentTaskType;
 import com.example.backend.config.AsyncConfig;
+import com.example.backend.nearmiss.service.NearMissAutoTagService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.scheduling.annotation.Async;
@@ -33,13 +35,15 @@ public class AgentProcessingListener {
     private final AgentRunRepository runRepository;
     private final AgentClient agentClient;
     private final AgentResultWriter writer;
+    private final NearMissAutoTagService nearMissAutoTag;
     private final JsonMapper jsonMapper;
 
     public AgentProcessingListener(AgentRunRepository runRepository, AgentClient agentClient,
-                                   AgentResultWriter writer, JsonMapper jsonMapper) {
+                                   AgentResultWriter writer, NearMissAutoTagService nearMissAutoTag, JsonMapper jsonMapper) {
         this.runRepository = runRepository;
         this.agentClient = agentClient;
         this.writer = writer;
+        this.nearMissAutoTag = nearMissAutoTag;
         this.jsonMapper = jsonMapper;
     }
 
@@ -54,7 +58,11 @@ public class AgentProcessingListener {
         long started = System.nanoTime();
         try {
             AgentReply reply = call(run);
-            writer.saveSuccess(run.getId(), reply.data(), elapsed(started));
+            if (run.getTaskType() == AgentTaskType.NEAR_MISS_TAG) {
+                nearMissAutoTag.saveResult(run.getId(), reply.data(), elapsed(started));   // 아차사고 태그로 저장 (대화·단계 없음)
+            } else {
+                writer.saveSuccess(run.getId(), reply.data(), elapsed(started));
+            }
         } catch (AgentCallException e) {
             log.warn("AI 서버 실행 실패. runId={} code={}", run.getId(), e.getCode());
             saveFailure(run.getId(), e.getCode(), e.getMessage(), e.getSteps(), started);
@@ -77,6 +85,7 @@ public class AgentProcessingListener {
                 yield agentClient.recordQuery(new RecordQueryCall(run.getId(), run.getSiteId(), input.message(),
                         input.context(), run.getMode().name()));
             }
+            case NEAR_MISS_TAG -> agentClient.nearMissTag(nearMissAutoTag.call(run));
             default -> throw new AgentCallException("AGENT_UNSUPPORTED", "아직 처리하지 않는 실행 종류입니다: " + run.getTaskType(), null);
         };
     }

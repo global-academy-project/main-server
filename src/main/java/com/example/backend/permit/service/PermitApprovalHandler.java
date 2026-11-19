@@ -13,8 +13,9 @@ import org.springframework.stereotype.Component;
 
 /**
  * 작업허가서 결재 처리.
- * 최종 승인 조건: 그 작업의 위험성평가가 있으면 승인 완료여야 한다 (계획서 7-5장, 3장 순서 위험성평가 → 허가).
- * 위험성평가가 아예 없는 작업(직접 등록한 작업)은 지금은 통과시킨다. 위험성평가 작성 API 가 생기면 필수로 바꾼다.
+ * 최종 승인 조건: 그 작업의 위험성평가(최신 판)가 반드시 있고 승인 완료여야 한다 (계획서 7-5장, 3장 순서 위험성평가 → 허가).
+ * 위험성평가가 없거나 아직 승인되지 않았으면 최종 승인을 막는다 (INVALID_STATE).
+ * 반려되면 허가서는 REJECTED 로 남고, 다시 내려면 새 판(POST /permits/{id}/revise)을 만든다.
  */
 @Component
 public class PermitApprovalHandler implements ApprovalTargetHandler {

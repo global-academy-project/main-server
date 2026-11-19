@@ -2,6 +2,7 @@ package com.example.backend.agent.repository;
 
 import com.example.backend.agent.entity.AgentRun;
 import com.example.backend.agent.entity.AgentRunStatus;
+import com.example.backend.agent.entity.AgentTaskType;
 import jakarta.persistence.LockModeType;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Lock;
@@ -24,6 +25,11 @@ public interface AgentRunRepository extends JpaRepository<AgentRun, Long> {
               and r.id = (select max(r2.id) from AgentRun r2 where r2.conversationId = r.conversationId)
             """)
     List<AgentRun> findLastRuns(@Param("conversationIds") Collection<Long> conversationIds);
+
+    /** 같은 대상의 실행이 이 시각 뒤에 시작해 아직 처리 중인지 (아차사고 자동 태깅 중복 시작 막기) */
+    boolean existsByTaskTypeAndTargetTypeAndTargetIdAndStatusAndCreatedAtAfter(AgentTaskType taskType, String targetType,
+                                                                               Long targetId, AgentRunStatus status,
+                                                                               LocalDateTime after);
 
     /** 멈춘 실행 정리용: 이 시각 전에 시작해 아직 PROCESSING 인 실행 */
     List<AgentRun> findByStatusAndCreatedAtBefore(AgentRunStatus status, LocalDateTime before);

@@ -13,6 +13,7 @@ import tools.jackson.databind.json.JsonMapper;
  *    선택 항목 LEL 을 끝에 한 번 물음 → slots.askedOptionalKeys)
  *  - 그다음 메시지: 답이 없어도 DONE + 단계·규칙 근거·승인 차단 사유 (초안 drafts 는 비움)
  * 응답 모양은 ai-model WorkRegisterResult 와 같다.
+ * 아차사고 태그 제안(nearMissTag)은 모델 없이 규칙만 쓴 모양(중대도 NEAR_MISS 하나, taggingSource near_miss_rules, model null).
  * 기록 질문(recordQuery)은 실제 기록을 조회하지 않고 질문을 그대로 되돌려 주는 DONE 답변만 돌려준다
  * (화면·저장 흐름 확인용. 실제 조회는 AI 서버가 search_records 를 불러야 한다).
  */
@@ -119,6 +120,19 @@ public class MockAgentClient implements AgentClient {
     public AgentReply recordQuery(RecordQueryCall call) {
         tools.jackson.databind.node.ObjectNode data = (tools.jackson.databind.node.ObjectNode) jsonMapper.readTree(RECORD_DONE);
         data.put("answer", "[mock] \"" + call.message() + "\" 질문을 받았습니다. 실제 기록 조회는 AI 서버(기록 질문 에이전트) 연결 후 됩니다.");
+        return new AgentReply(data);
+    }
+
+    @Override
+    public AgentReply nearMissTag(NearMissTagCall call) {
+        tools.jackson.databind.node.ObjectNode data = jsonMapper.createObjectNode();
+        tools.jackson.databind.node.ObjectNode severity = data.putArray("tags").addObject();
+        severity.put("axis", "SEVERITY");
+        severity.put("value", "NEAR_MISS");
+        severity.put("confidence", 1.0);
+        data.put("taggingSource", "near_miss_rules");
+        data.put("taggingVersion", "nm-1");
+        data.putNull("model");
         return new AgentReply(data);
     }
 

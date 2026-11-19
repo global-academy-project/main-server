@@ -165,13 +165,8 @@ public class NearMissService {
 
     @Transactional
     public NearMissResponse saveTags(Long userId, Long nearMissId, SaveTagsRequest r) {
-        NearMiss n = load(userId, nearMissId);
+        NearMiss n = loadForTagging(userId, nearMissId);
         User user = userRepository.findById(userId).orElseThrow(() -> new BusinessException(ErrorCode.UNAUTHORIZED));
-        boolean editor = n.getReporterId().equals(user.getId())
-                || siteAccessService.roleAt(user, n.getSiteId()).filter(TAG_EDITORS::contains).isPresent();
-        if (!editor) {
-            throw new BusinessException(ErrorCode.FORBIDDEN, "태그는 보고자 본인이나 승인자 이상만 저장할 수 있습니다.");
-        }
         if (r.lockVersion() != n.getLockVersion()) {
             throw new BusinessException(ErrorCode.CONFLICT_MODIFIED);
         }
@@ -236,6 +231,7 @@ public class NearMissService {
         lockVersions.bumpOnce(n, n.getId(), r.lockVersion(), n::getLockVersion);
         history(n, HistoryAction.UPDATE, user.getId(), Map.of("tags", wanted.values().stream()
                 .map(t -> t.axis() + ":" + t.value() + ":" + t.source()).toList()));
+        warningService.escalateFromNearMiss(n);   // 사람이 중상·사망으로 확정하면 이 아차사고의 미확인 경고를 긴급으로
         events.publishEvent(new NearMissTagsSavedEvent(n.getId()));   // 커밋 뒤 RAG 맞추기: 태그 있으면 적재, 없으면 삭제 (NearMissKbListener)
         return responses(List.of(n)).get(0);
     }
@@ -263,6 +259,19 @@ public class NearMissService {
             }
         }
         return responses(hits);
+    }
+
+    /** 태그를 저장·자동 태깅할 수 있는 보고: 현장 권한 + 보고자 본인 또는 그 현장 승인자 이상 */
+    @Transactional(readOnly = true)
+    public NearMiss loadForTagging(Long userId, Long nearMissId) {
+        NearMiss n = load(userId, nearMissId);
+        User user = userRepository.findById(userId).orElseThrow(() -> new BusinessException(ErrorCode.UNAUTHORIZED));
+        boolean editor = n.getReporterId().equals(user.getId())
+                || siteAccessService.roleAt(user, n.getSiteId()).filter(TAG_EDITORS::contains).isPresent();
+        if (!editor) {
+            throw new BusinessException(ErrorCode.FORBIDDEN, "태그는 보고자 본인이나 승인자 이상만 저장할 수 있습니다.");
+        }
+        return n;
     }
 
     // ------------------------------------------------------------------ 내부

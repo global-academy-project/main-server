@@ -8,7 +8,8 @@ import java.time.LocalDateTime;
 
 /**
  * 작업에 띄운 경고와 확인 기록 (시나리오 C). 테이블 규칙은 V5 work_warnings.
- * "경고를 보고도 진행했나"를 감사 때 보여 주는 기록이라, 경고 내용은 바꾸지 않고 확인(acknowledge)만 한 번 남긴다.
+ * "경고를 보고도 진행했나"를 감사 때 보여 주는 기록이라, 경고 문구는 바꾸지 않고 확인(acknowledge)만 한 번 남긴다.
+ * 등급만 예외: 확인 전이면 아차사고 중대도 확정에 따라 WARN → CRITICAL 로 올릴 수 있다 (내리지는 않는다).
  * 같은 아차사고로 같은 작업에 경고를 두 번 띄우지 않는다 (DB uk_ww_nm).
  */
 @Entity
@@ -38,7 +39,8 @@ public class WorkWarning {
 
     @Enumerated(EnumType.STRING)
     @JdbcTypeCode(SqlTypes.VARCHAR)
-    @Column(nullable = false, length = 10, updatable = false)
+    /** 확인 전에는 WARN → CRITICAL 로만 올릴 수 있다 (escalateToCritical) */
+    @Column(nullable = false, length = 10)
     private WarningSeverity severity = WarningSeverity.WARN;
 
     @Column(nullable = false, length = 500, updatable = false)
@@ -98,6 +100,18 @@ public class WorkWarning {
             throw new IllegalArgumentException("아차사고·규칙 경고는 fromNearMiss / fromRule 로 만듭니다.");
         }
         return new WorkWarning(siteId, workId, sourceType, null, null, severity, message);
+    }
+
+    /**
+     * 긴급(CRITICAL)으로 올린다: 아차사고 중대도가 나중에 중상·사망으로 확정된 경우.
+     * 확인하지 않은 경고만 (이미 확인한 경고는 그때의 등급으로 남긴다). 이미 긴급이면 false
+     */
+    public boolean escalateToCritical() {
+        if (isAcknowledged() || severity == WarningSeverity.CRITICAL) {
+            return false;
+        }
+        this.severity = WarningSeverity.CRITICAL;
+        return true;
     }
 
     /** 확인. 한 번만, CRITICAL 이면 조치 내용 필수 (DB ck_wwarn_crit) */

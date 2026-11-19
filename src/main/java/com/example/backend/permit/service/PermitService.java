@@ -76,6 +76,7 @@ public class PermitService {
     private final SiteGuard siteGuard;
     private final ApprovalService approvalService;
     private final RecordHistoryRepository historyRepository;
+    private final PermitBlockedNotifier blockedNotifier;
     private final JsonMapper jsonMapper;
     private final Clock clock;
 
@@ -84,7 +85,8 @@ public class PermitService {
                          RuleEvaluationRepository evaluationRepository, RuleViolationRepository violationRepository,
                          RuleRepository ruleRepository, WorkWarningRepository warningRepository,
                          SiteGuard siteGuard, ApprovalService approvalService,
-                         RecordHistoryRepository historyRepository, JsonMapper jsonMapper, Clock clock) {
+                         RecordHistoryRepository historyRepository, PermitBlockedNotifier blockedNotifier,
+                         JsonMapper jsonMapper, Clock clock) {
         this.permitRepository = permitRepository;
         this.measurementRepository = measurementRepository;
         this.workRepository = workRepository;
@@ -96,6 +98,7 @@ public class PermitService {
         this.siteGuard = siteGuard;
         this.approvalService = approvalService;
         this.historyRepository = historyRepository;
+        this.blockedNotifier = blockedNotifier;
         this.jsonMapper = jsonMapper;
         this.clock = clock;
     }
@@ -214,6 +217,7 @@ public class PermitService {
                 permit.getPermitType().toWorkType(), EvaluationTarget.PERMIT, permit.getId(), null, ruleInput(permit)));
         permit.applyEvaluation(result.evaluationId(), result.result() == EvaluationResult.BLOCK);
         permitRepository.saveAndFlush(permit);
+        blockedNotifier.notifyIfBlocked(permit, result, userId, LocalDateTime.now(clock));   // 차단이면 작성자·판정자에게 (하루 한 번)
         return new PermitCheckResponse(permit.getId(), permit.getStatus(),
                 canSubmit(permit, result.result(), result.rulesApplied()), result);
     }

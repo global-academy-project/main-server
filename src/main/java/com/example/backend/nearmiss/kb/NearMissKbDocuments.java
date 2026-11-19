@@ -1,6 +1,7 @@
 package com.example.backend.nearmiss.kb;
 
 import com.example.backend.nearmiss.entity.NearMiss;
+import com.example.backend.nearmiss.entity.NearMissStatus;
 import com.example.backend.nearmiss.repository.NearMissRepository;
 import com.example.backend.site.entity.WorkZone;
 import com.example.backend.site.repository.WorkZoneRepository;
@@ -27,6 +28,8 @@ import java.util.Optional;
  *  - kb_source_id·kb_chunk_id 는 업무 DB near_misses.id 다. agent_kb 의 PK 가 아니다 (검색 doc_id = NEAR_MISS:{id} 용)
  *  - 태그는 payload 최상위 severity·accident_type·hazard·work_type·cas·ghs (ai-model app/rag/filters.py 허용 키). 서버 물질 축(SUBSTANCE)은 cas
  *  - site_id 는 보고된 현장. flagged 는 항상 false (프롬프트 인젝션 의심 표시라 서버는 쓰지 않음)
+ *  - zone_id 는 키를 항상 넣는다 (구역이 없으면 null. ai-model 적재 검사가 키를 필수로 본다, 11/18)
+ *  - 사람이 태그를 저장한 보고(REPORTED 이후)만 적재한다. 보고 직후의 AI 자동 태깅은 제안이라 적재하지 않는다
  */
 @Component
 public class NearMissKbDocuments {
@@ -56,11 +59,11 @@ public class NearMissKbDocuments {
         this.zoneRepository = zoneRepository;
     }
 
-    /** 적재할 청크. 아차사고가 없거나 태그가 하나도 없으면 비어 있음 */
+    /** 적재할 청크. 아차사고가 없거나, 사람이 아직 태그를 저장하지 않았거나(REPORTED), 태그가 없으면 비어 있음 */
     @Transactional(readOnly = true)
     public Optional<KbIngestClient.Chunk> document(Long nearMissId) {
         NearMiss n = nearMissRepository.findById(nearMissId).orElse(null);
-        if (n == null) {
+        if (n == null || n.getStatus() == NearMissStatus.REPORTED) {
             return Optional.empty();
         }
         List<RecordTag> tags = tagRepository.findByRecordTypeAndRecordIdOrderByAxisAscIdAsc(RecordType.NEAR_MISS, n.getId());
@@ -116,9 +119,7 @@ public class NearMissKbDocuments {
         payload.put("locator", "아차사고 #" + id);
         payload.put("year", occurredAt.getYear());
         payload.put("occurred_at", occurredAt.withNano(0).toString());
-        if (zoneId != null) {
-            payload.put("zone_id", zoneId);
-        }
+        payload.put("zone_id", zoneId);   // null 이어도 키는 넣는다
         payload.put("text", body);
         return new KbIngestClient.Chunk(pointId(id), body, payload);
     }
