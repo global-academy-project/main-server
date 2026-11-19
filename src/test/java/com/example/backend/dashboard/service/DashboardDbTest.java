@@ -14,6 +14,7 @@ import com.example.backend.notification.repository.NotificationRepository;
 import com.example.backend.permit.dto.AddMeasurementsRequest;
 import com.example.backend.permit.dto.CreatePermitRequest;
 import com.example.backend.permit.entity.MeasurementItem;
+import com.example.backend.permit.entity.PermitStatus;
 import com.example.backend.permit.entity.PermitType;
 import com.example.backend.permit.service.PermitService;
 import com.example.backend.rule.entity.WorkType;
@@ -35,6 +36,7 @@ import com.example.backend.user.entity.UserRole;
 import com.example.backend.user.repository.UserRepository;
 import com.example.backend.work.dto.CreateWorkRequest;
 import com.example.backend.work.entity.Work;
+import com.example.backend.work.entity.WorkStatus;
 import com.example.backend.work.repository.WorkRepository;
 import com.example.backend.work.service.WorkService;
 import com.example.backend.signature.entity.Signature;
@@ -197,6 +199,23 @@ class DashboardDbTest {
         assertThat(item(d, IncompleteType.TBM_MISSING).overdue()).isFalse();
         assertThat(item(d, IncompleteType.DAILY_LOG_MISSING).overdue()).isFalse();
         assertThat(item(d, IncompleteType.MEASUREMENT_MISSING).count()).isZero();   // 일반 작업은 허가 없음
+    }
+
+    @Test
+    @DisplayName("허가서 규칙 판정이 차단(BLOCKED)이면 작업 상태가 그대로여도 차단으로 센다 (전체·팀·기간 요약)")
+    void permitBlockedCountsAsBlocked() {
+        Long blockedWork = work(PAST, WorkType.HOT);
+        Long permitId = hotPermit(blockedWork, PAST);
+        assertThat(permitService.check(adminId, permitId).status()).isEqualTo(PermitStatus.BLOCKED);   // 양식 확인 항목이 비어 BLOCK
+        work(PAST, WorkType.GENERAL);
+
+        DashboardResponse d = dashboardService.day(adminId, siteId, PAST);
+        assertThat(d.works().total()).isEqualTo(2);
+        assertThat(d.works().blocked()).isEqualTo(1);
+        assertThat(d.works().byStatus()).doesNotContainKey(WorkStatus.BLOCKED);   // 작업 상태는 바뀌지 않음
+        assertThat(d.teams()).extracting(DashboardResponse.Team::blocked).containsExactly(1);
+        assertThat(dashboardService.summary(adminId, siteId, PAST, PAST).days()).singleElement()
+                .satisfies(day -> assertThat(day.blocked()).isEqualTo(1));
     }
 
     @Test

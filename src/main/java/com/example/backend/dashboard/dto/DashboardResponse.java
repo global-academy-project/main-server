@@ -9,7 +9,8 @@ import java.util.Map;
 
 /**
  * GET /api/v1/sites/{siteId}/dashboard?date= : 그날 현황과 미완료 항목.
- *  - works: 그날 작업 수 (취소 제외). BLOCKED 는 전체에 포함하고 blocked 로 따로
+ *  - works: 그날 작업 수 (취소 제외). 차단은 전체에 포함하고 blocked 로 따로
+ *    (차단 = 작업 상태 BLOCKED 이거나 허가서 종류별 최신 판이 규칙 판정 차단. byStatus 는 작업 상태 그대로)
  *  - teams: 팀별 (팀 없는 작업은 teamId null, "팀 미지정")
  *  - items: 미완료 항목 9종 (IncompleteType 순서, 0건 포함). overdue 는 마감 지난 것이 하나라도 있으면 true
  */

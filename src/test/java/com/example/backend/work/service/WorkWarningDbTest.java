@@ -17,7 +17,10 @@ import com.example.backend.site.entity.SiteRole;
 import com.example.backend.site.repository.SiteMemberRepository;
 import com.example.backend.site.repository.SiteRepository;
 import com.example.backend.site.service.ZoneService;
+import com.example.backend.tag.entity.RecordTag;
+import com.example.backend.tag.entity.RecordType;
 import com.example.backend.tag.entity.TagAxis;
+import com.example.backend.tag.repository.RecordTagRepository;
 import com.example.backend.tag.entity.TagSource;
 import com.example.backend.user.entity.EmailVerifiedVia;
 import com.example.backend.user.entity.User;
@@ -34,6 +37,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.List;
@@ -56,6 +60,7 @@ class WorkWarningDbTest {
     @Autowired UserRepository userRepository;
     @Autowired SiteRepository siteRepository;
     @Autowired SiteMemberRepository siteMemberRepository;
+    @Autowired RecordTagRepository tagRepository;
 
     private String tag;
     private Long adminId;
@@ -134,6 +139,47 @@ class WorkWarningDbTest {
                 .containsExactly(recent.nearMissId());
         assertThat(warningService.list(writer, work(LocalDate.now(), null))).isEmpty();
         assertThat(warningService.unacknowledged(w)).isEqualTo(1);
+    }
+
+    @Test
+    @DisplayName("보고 직후 경고는 주의 → 사람이 중상으로 저장하면 미확인 경고만 긴급으로 올리고 다시 알림, 확인한 경고는 그대로")
+    void escalateAfterHumanSeverity() {
+        LocalDate today = LocalDate.now();
+        Long open = work(today, zoneA);
+        Long acked = work(today.plusDays(1), zoneA);
+        NearMissResponse n = nearMiss(zoneA, LocalDateTime.now().minusHours(1));
+        assertThat(warningService.list(writer, open)).singleElement()
+                .satisfies(w -> assertThat(w.severity()).isEqualTo(WarningSeverity.WARN));
+        warningService.acknowledge(writer, warningService.list(writer, acked).get(0).warningId(), null);   // 주의는 조치 없이 확인 가능
+
+        nearMissService.saveTags(reporter, n.nearMissId(), new SaveTagsRequest(n.lockVersion(), List.of(
+                new SaveTagsRequest.Tag(TagAxis.SEVERITY, "FATAL", TagSource.USER, null))));
+
+        assertThat(warningService.list(writer, open)).singleElement().satisfies(w -> {
+            assertThat(w.severity()).isEqualTo(WarningSeverity.CRITICAL);
+            assertThat(w.acknowledgedAt()).isNull();
+        });
+        assertThat(warningService.list(writer, acked)).singleElement().satisfies(w -> {
+            assertThat(w.severity()).isEqualTo(WarningSeverity.WARN);
+            assertThat(w.acknowledgedAt()).isNotNull();
+        });
+        assertThat(notificationService.list(writer, siteId, false).items())
+                .filteredOn(i -> i.type() == NotificationType.NEAR_MISS_WARNING && i.targetId().equals(open)).hasSize(2);
+        expectCode(() -> warningService.acknowledge(writer, warningService.list(writer, open).get(0).warningId(), null),
+                ErrorCode.INVALID_REQUEST);   // 긴급이 되었으니 조치 내용 필수
+    }
+
+    @Test
+    @DisplayName("사람이 저장하기 전(REPORTED)의 태그는 AI 제안이라 등급에 쓰지 않는다")
+    void aiSuggestionDoesNotEscalate() {
+        NearMissResponse n = nearMiss(zoneA, LocalDateTime.now().minusDays(1));
+        tagRepository.saveAndFlush(RecordTag.ai(RecordType.NEAR_MISS, n.nearMissId(), TagAxis.SEVERITY, "SERIOUS",
+                new BigDecimal("0.900")));
+
+        Long w = work(LocalDate.now(), zoneA);
+
+        assertThat(warningService.list(writer, w)).singleElement()
+                .satisfies(x -> assertThat(x.severity()).isEqualTo(WarningSeverity.WARN));
     }
 
     @Test

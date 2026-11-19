@@ -7,6 +7,12 @@ import com.example.backend.approval.service.ApprovalService;
 import com.example.backend.common.exception.ErrorCode;
 import com.example.backend.history.entity.HistoryTarget;
 import com.example.backend.history.repository.RecordHistoryRepository;
+import com.example.backend.notification.entity.Notification;
+import com.example.backend.notification.entity.NotificationRecipient;
+import com.example.backend.notification.entity.NotificationSeverity;
+import com.example.backend.notification.entity.NotificationTarget;
+import com.example.backend.notification.entity.NotificationType;
+import com.example.backend.notification.repository.NotificationRecipientRepository;
 import com.example.backend.permit.dto.AddMeasurementsRequest;
 import com.example.backend.permit.dto.CreatePermitRequest;
 import com.example.backend.permit.dto.PermitCheckResponse;
@@ -27,6 +33,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.data.domain.PageRequest;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -58,9 +65,11 @@ class PermitFlowIntegrationTest {
     @Autowired ApprovalService approvalService;
     @Autowired ApprovalRepository approvalRepository;
     @Autowired RecordHistoryRepository historyRepository;
+    @Autowired NotificationRecipientRepository recipientRepository;
     @Autowired EntityManager em;
 
     private Long adminId;
+    private Long siteId;
     private Long workId;
 
     @BeforeEach
@@ -70,10 +79,16 @@ class PermitFlowIntegrationTest {
         adminId = admin.getId();
         em.createNativeQuery("INSERT INTO sites (name, mode) VALUES (?1, 'GUIDE')").setParameter(1, "테스트현장-" + UUID.randomUUID()).executeUpdate();
         // 안내 모드(GUIDE): 요청자가 자기 문서를 승인·반려할 수 있다 (검증 모드는 불가)
-        Long siteId = ((Number) em.createNativeQuery("SELECT LAST_INSERT_ID()").getSingleResult()).longValue();
+        siteId = ((Number) em.createNativeQuery("SELECT LAST_INSERT_ID()").getSingleResult()).longValue();
         WorkResponse work = workService.create(adminId, new CreateWorkRequest(siteId, LocalDate.of(2026, 10, 29),
                 "R-201 하부 배관 플랜지 볼트 교체", "고착 시 그라인더 절단", WorkType.HOT, FROM, TO, 3));
         workId = work.workId();
+    }
+
+    /** 같은 현장의 다른 화기 작업 (작업당 종류별 허가 1건이라 두 번째 허가용) */
+    private Long otherWorkId() {
+        return workService.create(adminId, new CreateWorkRequest(siteId, LocalDate.of(2026, 10, 29),
+                "R-202 배관 용접", null, WorkType.HOT, FROM, TO, 2)).workId();
     }
 
     private static Map<String, Object> hotForm() {
@@ -88,6 +103,38 @@ class PermitFlowIntegrationTest {
     private PermitResponse measureLel(Long permitId, String value, LocalDateTime at) {
         return permitService.addMeasurements(adminId, permitId, new AddMeasurementsRequest(List.of(
                 new AddMeasurementsRequest.Item(MeasurementItem.LEL, new BigDecimal(value), at, "플랜지 주변", "박측정"))));
+    }
+
+    @Test
+    @DisplayName("판정 차단이면 작성자에게 차단 알림(필수, 허가서로 이동), 다시 판정해도 하루 한 번, 통과하면 없음")
+    void blockedNotification() {
+        Long id = createHotPermit().permitId();
+        measureLel(id, "12", FROM.minusHours(1));   // 폭발하한 10% 이상 → BLOCK
+
+        assertThat(permitService.check(adminId, id).status()).isEqualTo(PermitStatus.BLOCKED);
+        assertThat(permitService.check(adminId, id).status()).isEqualTo(PermitStatus.BLOCKED);   // 다시 판정
+
+        List<Notification> sent = blockedNotifications(id);
+        assertThat(sent).singleElement().satisfies(n -> {
+            assertThat(n.getSeverity()).isEqualTo(NotificationSeverity.CRITICAL);
+            assertThat(n.getTitle()).startsWith("작업허가 판정 차단");
+            assertThat(n.getMessage()).contains("막힌 항목");
+        });
+        assertThat(recipientRepository.findByUserIdAndDismissedAtIsNullOrderByIdDesc(adminId, PageRequest.of(0, 50)))
+                .extracting(NotificationRecipient::getNotificationId).contains(sent.get(0).getId());
+
+        Long passId = permitService.create(adminId, new CreatePermitRequest(otherWorkId(), PermitType.HOT, FROM, TO,
+                "김감시", "이반장", hotForm())).permitId();
+        measureLel(passId, "3", FROM.minusHours(1));
+        assertThat(permitService.check(adminId, passId).canSubmit()).isTrue();
+        assertThat(blockedNotifications(passId)).isEmpty();
+    }
+
+    private List<Notification> blockedNotifications(Long permitId) {
+        return em.createQuery("select n from Notification n where n.type = :type and n.targetType = :target"
+                        + " and n.targetId = :id", Notification.class)
+                .setParameter("type", NotificationType.BLOCKED).setParameter("target", NotificationTarget.PERMIT)
+                .setParameter("id", permitId).getResultList();
     }
 
     @Test

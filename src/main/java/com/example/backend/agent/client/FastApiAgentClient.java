@@ -24,6 +24,7 @@ import java.util.Map;
  * 실제 AI 서버(main-ai-model) 호출. app.agent.client=fastapi 일 때만.
  *   POST {base-url}/api/v1/agent/work-register
  *   POST {base-url}/api/v1/agent/record-query
+ *   POST {base-url}/api/v1/agent/near-miss-tag
  *   성공 {"success": true, "data": WorkRegisterResult}
  *   실패 {"success": false, "error": {"code", "message", "details"}, "steps": [...]}
  * 연결·응답 시간 제한은 application.yaml (app.agent.*). 토큰은 /internal 과 같은 값을 X-Internal-Token 으로 보낸다.
@@ -35,6 +36,7 @@ public class FastApiAgentClient implements AgentClient {
     static final String WORK_REGISTER_PATH = "/api/v1/agent/work-register";
     static final String RECORD_QUERY_PATH = "/api/v1/agent/record-query";
     static final String AUDIT_REPORT_PATH = "/api/v1/agent/audit-report";
+    static final String NEAR_MISS_TAG_PATH = "/api/v1/agent/near-miss-tag";
     private static final Logger log = LoggerFactory.getLogger(FastApiAgentClient.class);
 
     private final RestClient restClient;
@@ -84,6 +86,20 @@ public class FastApiAgentClient implements AgentClient {
     @Override
     public AgentReply auditReport(Map<String, Object> body) {
         return post(AUDIT_REPORT_PATH, body);
+    }
+
+    @Override
+    public AgentReply nearMissTag(NearMissTagCall call) {
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("runId", call.runId());
+        body.put("siteId", call.siteId());
+        body.put("nearMissId", call.nearMissId());
+        body.put("title", call.title());
+        body.put("description", call.description() == null ? "" : call.description());   // AI 서버는 문자열(기본 "")만 받는다
+        body.put("immediateAction", call.immediateAction());
+        body.put("zoneName", call.zoneName());
+        body.put("workType", call.workType());
+        return post(NEAR_MISS_TAG_PATH, body);
     }
 
     private AgentReply post(String path, Map<String, Object> body) {

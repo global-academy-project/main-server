@@ -46,4 +46,15 @@ class NearMissKbDocumentsTest {
                 + " 발생형태: 떨어짐. 작업: 고소. 관련 물질(CAS): 108-88-3. 중대도: 아차사고.");
         assertThat(p.get("text")).isEqualTo(c.text());
     }
+
+    @Test
+    @DisplayName("구역이 없어도 zone_id 키는 넣는다 (값 null). ai-model 적재 검사가 키를 필수로 본다")
+    void zoneIdNull() {
+        KbIngestClient.Chunk c = NearMissKbDocuments.build(7L, 3L, null, null, LocalDateTime.of(2026, 11, 18, 9, 0),
+                "사다리 흔들림", "", null, Map.of(TagAxis.SEVERITY, List.of("NEAR_MISS")), Map.of());
+
+        assertThat(c.payload()).containsKey("zone_id");
+        assertThat(c.payload().get("zone_id")).isNull();
+        assertThat(c.text()).doesNotContain("장소:");
+    }
 }

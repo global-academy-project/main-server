@@ -60,6 +60,8 @@ import java.util.stream.Collectors;
  * 대시보드 미완료 항목 (계획서 7-5장, D 확정 문서 4장).
  * 필수 값이 없으면 승인 요청이 막히므로 "누락된 채 승인된 문서"는 없다. 여기서는 **마감 전에 아직 끝나지 않은 것**을 센다.
  * 기준 날짜는 작업일, 기간은 양 끝 포함, 취소된 작업은 빼고 BLOCKED 는 포함.
+ * 차단(blocked): 작업 상태가 BLOCKED 이거나, 그 작업의 허가서(종류별 최신 판)가 규칙 판정 차단(BLOCKED)인 작업.
+ * 판정 차단은 허가서 상태로만 남고 작업 상태는 바뀌지 않기 때문이다.
  */
 @Service
 public class DashboardService {
@@ -186,10 +188,16 @@ public class DashboardService {
 
     // ------------------------------------------------------------------ 날짜별 미완료 (마감 알림도 같이 씀)
 
-    /** 하루치 결과: 작업(취소 제외)과 날짜 항목별 미완료 */
-    public record DayFindings(LocalDate date, List<Work> works, Map<IncompleteType, List<Entry>> entries) {
+    /** 하루치 결과: 작업(취소 제외)과 날짜 항목별 미완료. blockedWorkIds = 허가서 판정이 차단인 작업 */
+    public record DayFindings(LocalDate date, List<Work> works, Map<IncompleteType, List<Entry>> entries,
+                              Set<Long> blockedWorkIds) {
         public int blocked() {
-            return (int) works.stream().filter(w -> w.getStatus() == WorkStatus.BLOCKED).count();
+            return (int) works.stream().filter(this::isBlocked).count();
+        }
+
+        /** 작업 상태가 BLOCKED 이거나 허가서(종류별 최신 판)가 판정 차단 */
+        public boolean isBlocked(Work w) {
+            return w.getStatus() == WorkStatus.BLOCKED || blockedWorkIds.contains(w.getId());
         }
     }
 
@@ -209,8 +217,11 @@ public class DashboardService {
         works.forEach(w -> worksByDay.get(w.getWorkDate()).add(w));
         Map<Long, Work> workById = works.stream().collect(Collectors.toMap(Work::getId, Function.identity()));
 
+        Set<Long> blockedWorkIds = new HashSet<>();
         if (!works.isEmpty()) {
-            measurementMissing(workById, now, entries);
+            List<Permit> latest = latestPermits(permitRepository.findByWorkIdIn(workById.keySet()));
+            latest.stream().filter(p -> p.getStatus() == PermitStatus.BLOCKED).forEach(p -> blockedWorkIds.add(p.getWorkId()));
+            measurementMissing(workById, latest, now, entries);
             tbmMissing(works, site, now, entries);
         }
         dailyLogMissing(site, from, to, worksByDay, now, entries);
@@ -218,18 +229,18 @@ public class DashboardService {
         tbmSignaturesAndPhotos(siteId, from, to, entries);
 
         Map<LocalDate, DayFindings> out = new LinkedHashMap<>();
-        worksByDay.forEach((d, ws) -> out.put(d, new DayFindings(d, ws, entries.get(d))));
+        worksByDay.forEach((d, ws) -> out.put(d, new DayFindings(d, ws, entries.get(d), blockedWorkIds)));
         return out;
     }
 
     /** 화기·밀폐 허가가 작성 중(DRAFT·CHECKING·BLOCKED)이고 작업 전 측정값이 규칙 측정 항목보다 적음. 작업 시작이 지나면 지연 */
-    private void measurementMissing(Map<Long, Work> workById, LocalDateTime now,
+    private void measurementMissing(Map<Long, Work> workById, List<Permit> latest, LocalDateTime now,
                                     Map<LocalDate, Map<IncompleteType, List<Entry>>> entries) {
         Map<String, Set<MeasurementItem>> required = measurementRequirements.byPermitType();
         if (required.isEmpty()) {
             return;
         }
-        List<Permit> writing = latestPermits(permitRepository.findByWorkIdIn(workById.keySet())).stream()
+        List<Permit> writing = latest.stream()
                 .filter(p -> PERMIT_WRITING.contains(p.getStatus()) && required.containsKey(p.getPermitType().name()))
                 .toList();
         if (writing.isEmpty()) {
@@ -363,7 +374,7 @@ public class DashboardService {
                 .forEach(e -> incompleteByWork.merge(e.workId(), 1, Integer::sum)));
         return byTeam.entrySet().stream().map(e -> {
             List<Work> ws = e.getValue();
-            int blocked = (int) ws.stream().filter(w -> w.getStatus() == WorkStatus.BLOCKED).count();
+            int blocked = (int) ws.stream().filter(f::isBlocked).count();
             int incomplete = ws.stream().mapToInt(w -> incompleteByWork.getOrDefault(w.getId(), 0)).sum();
             String name = e.getKey() == null ? NO_TEAM : names.getOrDefault(e.getKey(), NO_TEAM);
             return new DashboardResponse.Team(e.getKey(), name, ws.size(), blocked, incomplete);

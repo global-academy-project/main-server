@@ -17,4 +17,11 @@ public interface AgentClient {
      * 응답 data 는 AuditReportResult (status, items[{queryType, title, summary, verification}], overallVerification)
      */
     AgentReply auditReport(java.util.Map<String, Object> body);
+
+    /**
+     * 아차사고 태그 제안 (ai-model POST /api/v1/agent/near-miss-tag, 시나리오 C).
+     * 응답 data 는 NearMissTagResponse (tags[{axis, value, confidence}], taggingSource, taggingVersion, model).
+     * 모델 호출이 실패해도 AI 서버는 규칙 태그로 성공 응답한다 (taggingSource near_miss_rules, model null. A 11/18 결정)
+     */
+    AgentReply nearMissTag(NearMissTagCall call);
 }

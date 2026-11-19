@@ -1,5 +1,6 @@
 package com.example.backend.nearmiss.kb;
 
+import com.example.backend.common.exception.ErrorCode;
 import com.example.backend.nearmiss.dto.NearMissResponse;
 import com.example.backend.nearmiss.dto.ReportNearMissRequest;
 import com.example.backend.nearmiss.dto.SaveTagsRequest;
@@ -33,6 +34,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
 
+import static com.example.backend.support.TestFixtures.expectCode;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** 아차사고 태그 저장 → RAG 이벤트, 청크 만들기, 적재·삭제 호출 (실제 DB, 끝나면 롤백) */
@@ -44,6 +46,7 @@ class NearMissKbDbTest {
 
     @Autowired NearMissService service;
     @Autowired NearMissKbDocuments documents;
+    @Autowired NearMissKbBackfill backfill;
     @Autowired ZoneService zoneService;
     @Autowired UserRepository userRepository;
     @Autowired SiteRepository siteRepository;
@@ -126,5 +129,33 @@ class NearMissKbDbTest {
                 return pointIds.size();
             }
         };
+    }
+
+    @Test
+    @DisplayName("일괄 적재: 사람이 태그를 저장한 보고만 대상(현장 지정), 실패한 번호를 돌려준다. 적재가 꺼져 있으면 409")
+    void backfillConfirmedOnly() {
+        NearMissResponse confirmed = service.report(reporter, new ReportNearMissRequest(siteId, zoneId, null, "발판 미끄러짐",
+                LocalDateTime.now().minusHours(2), "점검 중 발판이 미끄러짐", null));
+        service.saveTags(reporter, confirmed.nearMissId(), new SaveTagsRequest(confirmed.lockVersion(), List.of(
+                new Tag(TagAxis.SEVERITY, "NEAR_MISS", TagSource.USER, null))));
+        NearMissResponse failing = service.report(reporter, new ReportNearMissRequest(siteId, zoneId, null, "공구 낙하",
+                LocalDateTime.now().minusHours(1), "상부에서 공구가 떨어질 뻔함", null));
+        service.saveTags(reporter, failing.nearMissId(), new SaveTagsRequest(failing.lockVersion(), List.of(
+                new Tag(TagAxis.SEVERITY, "NEAR_MISS", TagSource.USER, null))));
+        NearMissResponse onlyReported = service.report(reporter, new ReportNearMissRequest(siteId, zoneId, null, "사다리 흔들림",
+                LocalDateTime.now().minusMinutes(30), "사다리 하부 고정 불량", null));
+
+        List<Long> seen = new ArrayList<>();
+        NearMissKbBackfill.Result result = backfill.sweep(siteId, id -> {
+            seen.add(id);
+            return !id.equals(failing.nearMissId());
+        });
+
+        assertThat(seen).containsExactly(confirmed.nearMissId(), failing.nearMissId()).doesNotContain(onlyReported.nearMissId());
+        assertThat(result.total()).isEqualTo(2);
+        assertThat(result.synced()).isEqualTo(1);
+        assertThat(result.failed()).isEqualTo(1);
+        assertThat(result.failedIds()).containsExactly(failing.nearMissId());
+        expectCode(() -> backfill.run(siteId), ErrorCode.INVALID_STATE);   // 테스트는 app.kb-ingest.client=none
     }
 }
