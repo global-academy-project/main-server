@@ -54,6 +54,10 @@ public class AuditReport {
     @Column(name = "data_snapshot", nullable = false, updatable = false, columnDefinition = "longtext")
     private String dataSnapshot;
 
+    /** 구성기 응답 원본 (V12). 옛 응답·실패·V12 전 보고서는 null */
+    @Column(name = "compose_json", columnDefinition = "longtext")
+    private String composeJson;
+
     @Column(name = "created_by", nullable = false, updatable = false)
     private Long createdBy;
 
@@ -122,9 +126,11 @@ public class AuditReport {
         this.failureReason = null;
     }
 
-    /** AI 요약·검증 결과 반영 */
-    public void applySummary(AuditReportStatus status, String overallVerification, String failureReason, String itemsJson) {
+    /** AI 요약·검증 결과 반영. composeJson: 구성기 응답 원본 (옛 응답·실패면 null) */
+    public void applySummary(AuditReportStatus status, String overallVerification, String failureReason, String itemsJson,
+                             String composeJson) {
         this.status = status;
+        this.composeJson = composeJson;
         this.overallVerification = overallVerification;
         this.failureReason = failureReason == null || failureReason.length() <= 500 ? failureReason : failureReason.substring(0, 500);
         this.itemsJson = itemsJson;
@@ -152,6 +158,7 @@ public class AuditReport {
     public String getSummary() { return summary; }
     public String getItemsJson() { return itemsJson; }
     public String getDataSnapshot() { return dataSnapshot; }
+    public String getComposeJson() { return composeJson; }
     public Long getCreatedBy() { return createdBy; }
     public int getLockVersion() { return lockVersion; }
     public LocalDateTime getCreatedAt() { return createdAt; }
