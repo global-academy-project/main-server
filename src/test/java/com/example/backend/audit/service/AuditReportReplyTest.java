@@ -35,7 +35,7 @@ class AuditReportReplyTest {
                     "items": [{"seq": 1, "queryType": "risk_assessment_rate", "state": "REVIEW", "stateLabel": "확인 필요",
                                "sentences": [{"text": "작업 3건 중 2건에 위험성평가가 작성됨.", "evidence": []},
                                              {"text": "  ", "evidence": []},
-                                             {"text": "실시율은 66.7%임.", "evidence": []}]}]},
+                                             {"text": "실시율은 66.7%%임.", "evidence": []}]}]},
                    {"no": "2", "seq": 2, "area": "아차사고",
                     "items": [{"seq": 2, "queryType": "near_miss_receipt", "state": "UNAVAILABLE", "stateLabel": "확인 불가",
                                "sentences": [{"text": "조회 항목이 아직 없음.", "evidence": []}]}]}],

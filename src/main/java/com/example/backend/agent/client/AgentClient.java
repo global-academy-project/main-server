@@ -14,7 +14,9 @@ public interface AgentClient {
     /**
      * 감사보고서 요약·수치 검증 (ai-model POST /api/v1/agent/audit-report).
      * body 는 ai-model AuditReportInput 모양 (reportId, siteId, dateFrom, dateTo, items[{queryType, title, stats, records, evidence}]).
-     * 응답 data 는 AuditReportResult (status, items[{queryType, title, summary, verification}], overallVerification)
+     * 응답 data 는 구성기 응답 (formType=AUDIT_REPORT, schemaVersion, status COMPLETE·INCOMPLETE, meta{reportId, siteId, …},
+     * groups[].items[{queryType, sentences[{text}], …}], overall, verification) 또는 옛 응답(가짜 AI 서버:
+     * status, items[{queryType, title, summary, verification}], overallVerification). 읽기는 AuditReportService.readReply
      */
     AgentReply auditReport(java.util.Map<String, Object> body);
 

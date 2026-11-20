@@ -50,7 +50,8 @@ import java.util.*;
  * 감사보고서 (웹 /audit-reports). 현장 관리자 이상만.
  * <ol>
  *   <li>만들기: 기간·조회 항목 → 서버가 기록 조회(search_records 와 같은 공식 기록 집계)로 항목별 집계를 만들어 저장 (GENERATING)</li>
- *   <li>커밋 뒤 AI 서버 /api/v1/agent/audit-report 에 집계를 보내 항목별 요약과 수치 검증을 받는다 (에이전트 실행기)</li>
+ *   <li>커밋 뒤 AI 서버 /api/v1/agent/audit-report 에 집계를 보내 요약을 받는다 (에이전트 실행기). 구성기 응답이면 항목별 문장을
+ *       요약에 넣고 검토 필요로 두며 응답 원본을 compose_json 에 저장, 옛 응답이면 항목별 요약·수치 검증 (readReply)</li>
  *   <li>AI 가 실패해도 보고서와 집계는 남고 상태만 FAILED (다시 요약하거나 사람이 쓴다)</li>
  * </ol>
  * 집계 원본은 data_snapshot 으로 고정. 사람은 제목·종합 의견·항목별 요약만 고친다. 열람·생성은 record_access_logs 에 남긴다.
@@ -202,7 +203,8 @@ public class AuditReportService {
         tx.executeWithoutResult(status -> reportRepository.findById(reportId)
                 .filter(x -> x.getStatus() == AuditReportStatus.GENERATING && !x.isDeleted())
                 .ifPresent(x -> {
-                    x.applySummary(result.status(), result.overall(), result.failure(), jsonMapper.writeValueAsString(result.items()));
+                    x.applySummary(result.status(), result.overall(), result.failure(), jsonMapper.writeValueAsString(result.items()),
+                            result.compose());
                     reportRepository.saveAndFlush(x);
                 }));
     }
@@ -374,7 +376,11 @@ public class AuditReportService {
 
     // ------------------------------------------------------------------ AI 요약
 
-    record Summary(AuditReportStatus status, String overall, String failure, ArrayNode items) {
+    /** compose: 구성기 응답 원본 JSON (옛 응답·실패면 null) */
+    record Summary(AuditReportStatus status, String overall, String failure, ArrayNode items, String compose) {
+        Summary(AuditReportStatus status, String overall, String failure, ArrayNode items) {
+            this(status, overall, failure, items, null);
+        }
     }
 
     /** AI 서버에 집계를 보내 항목별 요약·검증을 받는다. 실패하면 집계만 남기고 FAILED */
@@ -398,38 +404,94 @@ public class AuditReportService {
         body.put("items", sent);
         try {
             AgentReply reply = agentClient.auditReport(body);
-            JsonNode data = reply.data();
-            Map<String, JsonNode> byType = new HashMap<>();
-            JsonNode results = data.path("items");
-            for (int i = 0; i < results.size(); i++) {
-                JsonNode d = results.path(i);
-                byType.put(d.path("queryType").asString(), d);
-            }
-            ArrayNode merged = items.deepCopy();
-            for (int i = 0; i < merged.size(); i++) {
-                JsonNode node = merged.get(i);
-                JsonNode d = byType.get(node.path("queryType").asString());
-                if (d != null) {
-                    ((ObjectNode) node).put("summary", d.path("summary").asString());
-                    if (d.path("verification").isObject()) {
-                        ((ObjectNode) node).set("verification", d.path("verification"));
-                    } else {
-                        ((ObjectNode) node).putNull("verification");
-                    }
-                }
-            }
-            AuditReportStatus status = switch (data.path("status").asString()) {
-                case "DRAFT" -> AuditReportStatus.DRAFT;
-                case "REVIEW_REQUIRED" -> AuditReportStatus.REVIEW_REQUIRED;
-                default -> AuditReportStatus.FAILED;
-            };
-            String overall = data.path("overallVerification").asString();
-            return new Summary(status, "PASS".equals(overall) || "FAIL".equals(overall) ? overall : null,
-                    status == AuditReportStatus.FAILED ? "AI 요약이 완료되지 않았습니다." : null, merged);
+            return readReply(report.getId(), report.getSiteId(), items, reply.data(), jsonMapper);
         } catch (AgentCallException e) {
             log.warn("감사보고서 AI 요약 실패: reportId={} code={} reason={}", report.getId(), e.getCode(), e.getMessage());
             return new Summary(AuditReportStatus.FAILED, null, e.getMessage(), items);
         }
+    }
+
+    /**
+     * AI 서버 응답 읽기. 응답 모양으로 둘을 가른다 (B 「summarize 수정 안내」, 11/20).
+     * <ul>
+     *   <li>구성기 응답 (formType 있음): formType=AUDIT_REPORT·schemaVersion=v1·meta.reportId·meta.siteId 가 이 보고서와 같아야 한다.
+     *       맞으면 groups[].items[] 를 queryType 으로 찾아 sentences[].text 를 줄바꿈으로 이어 항목 요약에 넣고(짝이 없으면 그대로),
+     *       항목 verification·전체 검증은 null, 상태는 검토 필요(REVIEW_REQUIRED: COMPLETE·INCOMPLETE 모두), 응답 data 원본을 compose 로 저장.
+     *       맞지 않으면 요약 실패. 숫자는 다시 계산하지 않는다 (집계는 items_json 의 서버 값 그대로)</li>
+     *   <li>옛 응답 (formType 없음, 가짜 AI 서버 포함): 항목별 summary·verification, status DRAFT·REVIEW_REQUIRED, overallVerification</li>
+     * </ul>
+     */
+    static Summary readReply(Long reportId, Long siteId, ArrayNode items, JsonNode data, JsonMapper jsonMapper) {
+        if (!data.has("formType")) {
+            return readLegacyReply(items, data);
+        }
+        boolean sameReport = "AUDIT_REPORT".equals(data.path("formType").asString())
+                && "v1".equals(data.path("schemaVersion").asString())
+                && data.path("meta").path("reportId").asLong() == reportId
+                && data.path("meta").path("siteId").asLong() == siteId;
+        if (!sameReport) {
+            log.warn("감사 대응 보고서 AI 응답이 요청과 맞지 않습니다: reportId={}", reportId);
+            return new Summary(AuditReportStatus.FAILED, null, "AI 서버 응답이 요청과 맞지 않습니다.", items);
+        }
+        Map<String, JsonNode> byType = new HashMap<>();
+        JsonNode groups = data.path("groups");
+        for (int g = 0; g < groups.size(); g++) {
+            JsonNode composed = groups.path(g).path("items");
+            for (int i = 0; i < composed.size(); i++) {
+                JsonNode d = composed.path(i);
+                byType.put(d.path("queryType").asString(), d);
+            }
+        }
+        ArrayNode merged = items.deepCopy();
+        for (int i = 0; i < merged.size(); i++) {
+            JsonNode node = merged.get(i);
+            JsonNode d = byType.get(node.path("queryType").asString());
+            if (d == null) {
+                continue;   // 짝이 없으면 요약은 비워 둔다 (집계는 남아 있다)
+            }
+            List<String> lines = new ArrayList<>();
+            JsonNode sentences = d.path("sentences");
+            for (int s = 0; s < sentences.size(); s++) {
+                String text = sentences.path(s).path("text").asString();
+                if (text != null && !text.isBlank()) {
+                    lines.add(text.trim());
+                }
+            }
+            ((ObjectNode) node).put("summary", String.join("\n", lines));
+            ((ObjectNode) node).putNull("verification");
+        }
+        return new Summary(AuditReportStatus.REVIEW_REQUIRED, null, null, merged, jsonMapper.writeValueAsString(data));
+    }
+
+    /** 옛 응답 (항목별 요약): status DRAFT·REVIEW_REQUIRED 외에는 요약 실패 */
+    private static Summary readLegacyReply(ArrayNode items, JsonNode data) {
+        Map<String, JsonNode> byType = new HashMap<>();
+        JsonNode results = data.path("items");
+        for (int i = 0; i < results.size(); i++) {
+            JsonNode d = results.path(i);
+            byType.put(d.path("queryType").asString(), d);
+        }
+        ArrayNode merged = items.deepCopy();
+        for (int i = 0; i < merged.size(); i++) {
+            JsonNode node = merged.get(i);
+            JsonNode d = byType.get(node.path("queryType").asString());
+            if (d != null) {
+                ((ObjectNode) node).put("summary", d.path("summary").asString());
+                if (d.path("verification").isObject()) {
+                    ((ObjectNode) node).set("verification", d.path("verification"));
+                } else {
+                    ((ObjectNode) node).putNull("verification");
+                }
+            }
+        }
+        AuditReportStatus status = switch (data.path("status").asString()) {
+            case "DRAFT" -> AuditReportStatus.DRAFT;
+            case "REVIEW_REQUIRED" -> AuditReportStatus.REVIEW_REQUIRED;
+            default -> AuditReportStatus.FAILED;
+        };
+        String overall = data.path("overallVerification").asString();
+        return new Summary(status, "PASS".equals(overall) || "FAIL".equals(overall) ? overall : null,
+                status == AuditReportStatus.FAILED ? "AI 요약이 완료되지 않았습니다." : null, merged);
     }
 
     // ------------------------------------------------------------------ 내부
@@ -468,9 +530,11 @@ public class AuditReportService {
 
     private AuditReportResponse response(AuditReport r, Map<Long, String> names, boolean withItems) {
         JsonNode items = withItems ? jsonMapper.readTree(r.getItemsJson()) : jsonMapper.createArrayNode();
+        // 구성기 응답 원본은 상세에서만 (목록은 null)
+        JsonNode composeResult = withItems && r.getComposeJson() != null ? jsonMapper.readTree(r.getComposeJson()) : null;
         return new AuditReportResponse(r.getId(), r.getSiteId(), r.getTitle(), r.getDateFrom(), r.getDateTo(),
                 List.of(r.getQueryTypes().split(",")), r.getStatus(), r.getStatus().label(), r.getOverallVerification(),
-                r.getFailureReason(), r.getSummary(), items, r.getCreatedBy(), names.get(r.getCreatedBy()),
+                r.getFailureReason(), r.getSummary(), items, composeResult, r.getCreatedBy(), names.get(r.getCreatedBy()),
                 r.getCreatedAt(), r.getUpdatedAt(), r.getLockVersion(), retryable(r));
     }
 

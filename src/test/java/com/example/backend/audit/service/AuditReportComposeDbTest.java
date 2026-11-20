@@ -33,7 +33,8 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.when;
 
 /**
- * 감사 대응 보고서: AI 서버가 구성기 응답을 줄 때 (11/20). 만들기 → 요약 → 검토 필요 + 항목 요약 + 원본(compose_json, V12) 저장.
+ * 감사 대응 보고서: AI 서버가 구성기 응답을 줄 때 (11/20). 만들기 → 요약 → 검토 필요 + 항목 요약 + 원본(compose_json, V12) 저장,
+ * 상세 응답의 composeResult.
  * AI 서버는 Mockito 로 대신한다 (받은 reportId·siteId 를 meta 에 그대로 담는 구성기 응답). 실제 DB, 끝나면 롤백.
  */
 @SpringBootTest
@@ -99,6 +100,9 @@ class AuditReportComposeDbTest {
         assertThat(r.items().get(1).path("verification").isNull()).isTrue();
         AuditReport saved = reportRepository.findById(r.reportId()).orElseThrow();
         assertThat(jsonMapper.readTree(saved.getComposeJson()).path("status").asString()).isEqualTo("INCOMPLETE");
+        // 상세 응답에 원본(composeResult)을 싣고, 목록에는 싣지 않는다
+        assertThat(r.composeResult().path("formType").asString()).isEqualTo("AUDIT_REPORT");
+        assertThat(service.list(adminId, siteId)).singleElement().satisfies(x -> assertThat(x.composeResult()).isNull());
     }
 
     @Test
@@ -111,5 +115,6 @@ class AuditReportComposeDbTest {
         assertThat(r.failureReason()).isEqualTo("AI 서버 응답이 요청과 맞지 않습니다.");
         assertThat(r.summaryRetryable()).isTrue();
         assertThat(reportRepository.findById(r.reportId()).orElseThrow().getComposeJson()).isNull();
+        assertThat(r.composeResult()).isNull();
     }
 }
