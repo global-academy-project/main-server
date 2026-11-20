@@ -44,4 +44,32 @@ class MockAgentClientTest {
         assertThat(ask.path("slots").has("pendingText")).isFalse();
         assertThat(ask.path("slots").path("askedKeys").size()).isPositive();
     }
+
+    @Test
+    @DisplayName("감사 분기: '감사'만 있으면 기간 되묻기(audit_period) → 답하면 지난달 route, '지난달'이 함께 있으면 바로 route")
+    void auditRoute() {
+        JsonNode ask = call("감사 대응 보고서 만들어줘", null);
+        assertThat(ask.path("runStatus").asString()).isEqualTo("WAITING_INPUT");
+        assertThat(ask.path("ask").path("missing_fields").get(0).path("key").asString()).isEqualTo("audit_period");
+        assertThat(ask.path("slots").path("pendingText").asString()).isEqualTo("감사 대응 보고서 만들어줘");
+
+        JsonNode done = call("지난달", ask.path("slots"));
+        assertThat(done.path("runStatus").asString()).isEqualTo("DONE");
+        assertThat(done.path("route").path("target").asString()).isEqualTo("AUDIT_REPORT");
+        java.time.LocalDate from = java.time.LocalDate.parse(done.path("route").path("dateFrom").asString());
+        java.time.LocalDate to = java.time.LocalDate.parse(done.path("route").path("dateTo").asString());
+        assertThat(from.getDayOfMonth()).isEqualTo(1);
+        assertThat(to).isEqualTo(from.withDayOfMonth(from.lengthOfMonth()));
+        assertThat(done.path("drafts").isNull()).isTrue();
+
+        assertThat(call("지난달 감사 대응 보고서", null).path("route").path("target").asString()).isEqualTo("AUDIT_REPORT");
+    }
+
+    @Test
+    @DisplayName("'감사합니다' 인사는 감사 분기가 아니다")
+    void thanksIsNotAudit() {
+        JsonNode ask = call("내일 배관 용접 작업이요 감사합니다", null);
+        assertThat(ask.path("route").isMissingNode() || ask.path("route").isNull()).isTrue();
+        assertThat(ask.path("slots").path("askedKeys").size()).isPositive();
+    }
 }

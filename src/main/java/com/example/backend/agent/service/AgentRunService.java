@@ -181,7 +181,8 @@ public class AgentRunService {
         Long permitId = run.getInputJson() == null ? null
                 : longOrNull(jsonMapper.readTree(run.getInputJson()).path("permitId"));
         Long workId = "WORK".equals(run.getTargetType()) ? run.getTargetId() : null;
-        return new AgentRunDetail(run.getId(), run.getConversationId(), run.getSiteId(), permitId, workId,
+        Long auditReportId = AgentResultWriter.AUDIT_TARGET.equals(run.getTargetType()) ? run.getTargetId() : null;
+        return new AgentRunDetail(run.getId(), run.getConversationId(), run.getSiteId(), permitId, workId, auditReportId,
                 run.getTaskType(), run.getStatus(), result,
                 run.getErrorMessage(), run.getTotalMs(), steps, citations, run.getCreatedAt(), run.getFinishedAt());
     }

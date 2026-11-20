@@ -100,10 +100,10 @@ public class AuditReport {
     /** 제목·종합 의견·항목(요약) 고치기 (삭제된 보고서는 불가) */
     public void edit(String title, String summary, String itemsJson) {
         if (deletedAt != null) {
-            throw new IllegalStateException("삭제된 감사보고서입니다.");
+            throw new IllegalStateException("삭제된 감사 대응 보고서입니다.");
         }
         if (status == AuditReportStatus.GENERATING && this.itemsJson != null) {
-            throw new IllegalStateException("AI 요약 중인 감사보고서는 고칠 수 없습니다. 요약이 끝난 뒤 고쳐 주세요.");
+            throw new IllegalStateException("AI 요약 중인 감사 대응 보고서는 고칠 수 없습니다. 요약이 끝난 뒤 고쳐 주세요.");
         }
         if (title == null || title.isBlank() || itemsJson == null) {
             throw new IllegalArgumentException("제목이 필요합니다.");
@@ -116,7 +116,7 @@ public class AuditReport {
     /** AI 요약 다시 하기 (요약 실패, 또는 요약 중 상태로 오래 멈춘 경우) */
     public void restartSummary() {
         if (deletedAt != null) {
-            throw new IllegalStateException("삭제된 감사보고서입니다.");
+            throw new IllegalStateException("삭제된 감사 대응 보고서입니다.");
         }
         this.status = AuditReportStatus.GENERATING;
         this.failureReason = null;
@@ -132,7 +132,7 @@ public class AuditReport {
 
     public void delete(Long userId, LocalDateTime now) {
         if (deletedAt != null) {
-            throw new IllegalStateException("이미 삭제된 감사보고서입니다.");
+            throw new IllegalStateException("이미 삭제된 감사 대응 보고서입니다.");
         }
         this.deletedAt = now;
         this.deletedBy = userId;

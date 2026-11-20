@@ -45,4 +45,17 @@ public class SiteGuard {
         }
         return user;
     }
+
+    /**
+     * 현장 관리자 이상(SITE_ADMIN, 회사 관리자)인가. 예외를 던지지 않는다.
+     * 다른 트랜잭션 안에서 권한만 미리 확인할 때 쓴다 (예외가 나면 바깥 트랜잭션이 롤백 표시되는 것을 피함, 채팅 감사 분기).
+     */
+    public boolean isSiteAdmin(Long userId, Long siteId) {
+        User user = userId == null ? null : userRepository.findById(userId).orElse(null);
+        if (user == null || siteId == null || !siteAccessService.canAccess(user, siteId)) {
+            return false;
+        }
+        String role = siteAccessService.roleAt(user, siteId).orElse(null);
+        return "SITE_ADMIN".equals(role) || "ADMIN".equals(role);
+    }
 }

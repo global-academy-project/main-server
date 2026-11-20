@@ -12,7 +12,7 @@ import java.util.List;
  */
 @JsonIgnoreProperties(ignoreUnknown = true)
 public record WorkRegisterData(String runStatus, JsonNode slots, Ask ask, ApprovalGate approvalGate,
-                        List<CitationItem> citations, List<StepItem> steps) {
+                        List<CitationItem> citations, List<StepItem> steps, Route route) {
 
     @JsonIgnoreProperties(ignoreUnknown = true)
     public record Ask(String message) {
@@ -20,6 +20,14 @@ public record WorkRegisterData(String runStatus, JsonNode slots, Ask ask, Approv
 
     @JsonIgnoreProperties(ignoreUnknown = true)
     public record ApprovalGate(Boolean canRequest, List<String> reasons) {
+    }
+
+    /**
+     * 작업 등록이 아닌 화면으로 이어질 때만 (작업 등록 응답에서는 null). target=AUDIT_REPORT: 감사 대응 보고서,
+     * dateFrom·dateTo(YYYY-MM-DD, 양 끝 포함)로 보고서를 만든다. message 는 만들 때 대화에 보일 문구 (B 감사 분기 안내)
+     */
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    public record Route(String target, String dateFrom, String dateTo, String message) {
     }
 
     /** kind: KB(청크 UUID) / RULE(규칙 코드) / MSDS(CAS 또는 물질 이름). sourceType·kbCollection 은 KB 저장에 필요 (아직 AI 서버가 안 줌) */
