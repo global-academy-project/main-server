@@ -110,7 +110,7 @@ class AuditReportDbTest {
     }
 
     @Test
-    @DisplayName("현장 관리자 미만은 쓸 수 없고, 없는 항목·중복·뒤집힌 기간은 거절")
+    @DisplayName("현장 관리자 미만은 쓸 수 없고, 없는 항목·중복·뒤집힌 기간·미래 기간은 거절")
     void guards() {
         LocalDate today = LocalDate.now();
         expectCode(() -> service.list(writer, siteId), ErrorCode.FORBIDDEN);
@@ -119,6 +119,9 @@ class AuditReportDbTest {
         expectCode(() -> service.create(adminId, siteId, new CreateAuditReportRequest(today, today,
                 List.of("blocked_records", "blocked_records"))), ErrorCode.INVALID_REQUEST);
         expectCode(() -> service.create(adminId, siteId, new CreateAuditReportRequest(today, today.minusDays(1),
+                List.of("blocked_records"))), ErrorCode.INVALID_REQUEST);
+        // 미래 기간 (종료일이 오늘 이후)은 거절 (11/20, 화면에서 만들 때도)
+        expectCode(() -> service.create(adminId, siteId, new CreateAuditReportRequest(today, today.plusDays(1),
                 List.of("blocked_records"))), ErrorCode.INVALID_REQUEST);
     }
 

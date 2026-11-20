@@ -14,6 +14,9 @@ import tools.jackson.databind.json.JsonMapper;
  *  - 그다음 메시지: 답이 없어도 DONE + 단계·규칙 근거·승인 차단 사유 (초안 drafts 는 비움)
  * 응답 모양은 ai-model WorkRegisterResult 와 같다.
  * 아차사고 태그 제안(nearMissTag)은 모델 없이 규칙만 쓴 모양(중대도 NEAR_MISS 하나, taggingSource near_miss_rules, model null).
+ * 감사 대응 보고서(감사 분기): 말에 "감사"가 있으면('감사합니다' 같은 인사 제외) 기간을 묻고(WAITING_INPUT, missing_fields
+ * audit_period, pendingText), 말에 "지난달"이 있거나 되묻기에 답하면 지난달 기간으로 route(target AUDIT_REPORT)를 돌려준다.
+ * 기간은 실제 AI 서버처럼 읽지 않는다 (화면·저장 흐름 확인용).
  * 기록 질문(recordQuery)은 실제 기록을 조회하지 않고 질문을 그대로 되돌려 주는 DONE 답변만 돌려준다
  * (화면·저장 흐름 확인용. 실제 조회는 AI 서버가 search_records 를 불러야 한다).
  */
@@ -89,6 +92,32 @@ public class MockAgentClient implements AgentClient {
                 "input": {}, "output": {}, "elapsedMs": 2}]}
             """;
 
+    /** 감사 분기: 기간을 묻는 되묻기 (ai-model audit_route_handler 와 같은 모양) */
+    private static final String AUDIT_ASK = """
+            {"runStatus": "WAITING_INPUT",
+             "slots": {"pendingText": ""},
+             "ask": {"message": "[mock] 어느 기간의 감사 대응 보고서를 만들까요? 예: 지난달",
+                     "missing_fields": [{"key": "audit_period", "label": "보고서 기간", "question": "어느 기간인가요?"}]},
+             "classification": {"workTypes": [], "highRisk": null, "requiredPermits": [],
+                                "canStartBeforeApproval": false},
+             "citations": [], "verification": [], "guidance": [], "llmSources": {}, "route": null, "steps": []}
+            """;
+
+    /** 감사 분기: 기간을 읽음 (초안 없음, steps 비어 있음) */
+    private static final String AUDIT_ROUTE = """
+            {"runStatus": "DONE",
+             "slots": {},
+             "classification": {"workTypes": [], "highRisk": null, "requiredPermits": [],
+                                "canStartBeforeApproval": false},
+             "drafts": null, "citations": [], "verification": [], "guidance": [], "llmSources": {},
+             "route": {"target": "AUDIT_REPORT", "dateFrom": "", "dateTo": "", "message": ""},
+             "steps": []}
+            """;
+
+    /** 인사말 '감사합니다' 등은 감사 분기 단서가 아니다 */
+    private static final java.util.regex.Pattern THANKS =
+            java.util.regex.Pattern.compile("감사\\s*(합니다|합니당|해요|했|드립|드려|히|하다|함)");
+
     private final JsonMapper jsonMapper;
 
     public MockAgentClient(JsonMapper jsonMapper) {
@@ -99,6 +128,19 @@ public class MockAgentClient implements AgentClient {
     public AgentReply workRegister(WorkRegisterCall call) {
         JsonNode slots = call.slots();
         boolean first = slots == null || slots.isNull();
+        JsonNode pendingAudit = first ? null : slots.path("pendingText");
+        String pendingTextValue = pendingAudit != null && pendingAudit.isString() ? pendingAudit.asString() : "";
+        if (looksLikeAudit(pendingTextValue)) {
+            return new AgentReply(auditRoute());   // 감사 기간 되묻기의 답
+        }
+        if ((first || pendingTextValue.isBlank()) && looksLikeAudit(call.message())) {
+            if (call.message().contains("지난달")) {
+                return new AgentReply(auditRoute());
+            }
+            tools.jackson.databind.node.ObjectNode data = (tools.jackson.databind.node.ObjectNode) jsonMapper.readTree(AUDIT_ASK);
+            ((tools.jackson.databind.node.ObjectNode) data.get("slots")).put("pendingText", call.message());
+            return new AgentReply(data);
+        }
         if (first && !looksLikeWork(call.message())) {
             tools.jackson.databind.node.ObjectNode data = (tools.jackson.databind.node.ObjectNode) jsonMapper.readTree(UNKNOWN);
             ((tools.jackson.databind.node.ObjectNode) data.get("slots")).put("pendingText", call.message());
@@ -110,6 +152,22 @@ public class MockAgentClient implements AgentClient {
                 && !pendingText.asString().isBlank();
         JsonNode data = jsonMapper.readTree(first || pending ? ASK : DONE);
         return new AgentReply(data);
+    }
+
+    static boolean looksLikeAudit(String message) {
+        return message != null && THANKS.matcher(message).replaceAll(" ").contains("감사");
+    }
+
+    /** 지난달(서울) 1일 ~ 말일로 route */
+    private JsonNode auditRoute() {
+        java.time.LocalDate first = java.time.LocalDate.now(java.time.ZoneId.of("Asia/Seoul")).withDayOfMonth(1).minusMonths(1);
+        java.time.LocalDate last = first.withDayOfMonth(first.lengthOfMonth());
+        tools.jackson.databind.node.ObjectNode data = (tools.jackson.databind.node.ObjectNode) jsonMapper.readTree(AUDIT_ROUTE);
+        tools.jackson.databind.node.ObjectNode route = (tools.jackson.databind.node.ObjectNode) data.get("route");
+        route.put("dateFrom", first.toString());
+        route.put("dateTo", last.toString());
+        route.put("message", "[mock] " + first + " ~ " + last + " 기간의 감사 대응 보고서를 만들게요. 완료되면 감사 대응 화면에서 확인할 수 있어요.");
+        return data;
     }
 
     static boolean looksLikeWork(String message) {

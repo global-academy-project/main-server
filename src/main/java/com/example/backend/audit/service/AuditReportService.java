@@ -72,6 +72,9 @@ public class AuditReportService {
         QUERY_TITLES = Collections.unmodifiableMap(m);
     }
 
+    /** 조회 항목 전부 (화면 순서). 채팅(작업 등록 대화)에서 만들 때는 항상 전부 넣는다 */
+    public static final List<String> ALL_QUERY_TYPES = List.copyOf(QUERY_TITLES.keySet());
+
     private final AuditReportRepository reportRepository;
     private final RecordSearchService recordSearchService;
     private final CorrectiveActionRepository actionRepository;
@@ -150,7 +153,7 @@ public class AuditReportService {
             snapshot.set(type, item.deepCopy());
             items.add(item);
         }
-        String title = "감사보고서 " + r.dateFrom() + " ~ " + r.dateTo();
+        String title = "감사 대응 보고서 " + r.dateFrom() + " ~ " + r.dateTo();
         AuditReport report = reportRepository.saveAndFlush(new AuditReport(siteId, title, r.dateFrom(), r.dateTo(),
                 String.join(",", types), AuditReportStatus.GENERATING, null, null, jsonMapper.writeValueAsString(items),
                 jsonMapper.writeValueAsString(snapshot), userId));
@@ -170,7 +173,7 @@ public class AuditReportService {
         AuditReport report = load(userId, siteId, reportId);
         if (!retryable(report)) {
             throw new BusinessException(ErrorCode.INVALID_STATE,
-                    "요약에 실패했거나 요약 중으로 오래 멈춘 감사보고서만 다시 요약할 수 있습니다.");
+                    "요약에 실패했거나 요약 중으로 오래 멈춘 감사 대응 보고서만 다시 요약할 수 있습니다.");
         }
         run(report::restartSummary);
         // 멈춘 요약(이미 GENERATING)은 바뀌는 칼럼이 없어 UPDATE 가 안 나간다. 판을 올려 updated_at 도 새로 찍는다
@@ -202,6 +205,52 @@ public class AuditReportService {
                     x.applySummary(result.status(), result.overall(), result.failure(), jsonMapper.writeValueAsString(result.items()));
                     reportRepository.saveAndFlush(x);
                 }));
+    }
+
+    // ------------------------------------------------------------------ 채팅에서 만들기
+
+    /**
+     * 채팅 감사 분기 결과.
+     * reportId: 만들었거나 이미 있던 보고서 (거절이면 null) / created: 이번에 새로 만들었는가 / refusal: 거절 사유 문구 (대화에 그대로 보임)
+     */
+    public record ChatResult(Long reportId, boolean created, String refusal) {
+        static ChatResult refused(String message) {
+            return new ChatResult(null, false, message);
+        }
+    }
+
+    /**
+     * 작업 등록 대화의 감사 분기 (AI 서버 route.target=AUDIT_REPORT). AI 결과 저장과 같은 트랜잭션에서 부른다.
+     * 거절할 일(권한·기간)은 예외 대신 결과로 돌려준다: 여기서 예외가 나가면 바깥 트랜잭션(실행 결과 저장)이 롤백 표시되기 때문.
+     * <ol>
+     *   <li>현장 관리자 이상만</li>
+     *   <li>시작일 ≤ 종료일, 종료일은 오늘(서울) 이전, app.records.max-days 일까지</li>
+     *   <li>같은 현장·작성자·기간·항목(전부)의 보고서가 있으면 새로 만들지 않고 그 보고서 (요약 중·요약 실패도 그대로)</li>
+     *   <li>없으면 항목 전부로 만든다 (create: 집계 → 저장 → 커밋 뒤 AI 요약)</li>
+     * </ol>
+     */
+    @Transactional
+    public ChatResult createFromChat(Long userId, Long siteId, LocalDate from, LocalDate to) {
+        if (!siteGuard.isSiteAdmin(userId, siteId)) {
+            return ChatResult.refused("감사 대응 보고서는 현장 관리자 이상만 만들 수 있어요.");
+        }
+        if (from.isAfter(to)) {
+            return ChatResult.refused("시작일이 종료일보다 늦어요. 기간을 다시 알려 주세요.");
+        }
+        if (to.isAfter(LocalDate.now(clock))) {
+            return ChatResult.refused("오늘 이후 날짜는 넣을 수 없어요. 오늘까지의 기간으로 다시 알려 주세요.");
+        }
+        if (ChronoUnit.DAYS.between(from, to) + 1 > maxDays) {
+            return ChatResult.refused("감사 대응 보고서 기간은 " + maxDays + "일까지예요. 기간을 줄여 다시 알려 주세요.");
+        }
+        Optional<AuditReport> same = reportRepository
+                .findFirstBySiteIdAndCreatedByAndDateFromAndDateToAndQueryTypesAndDeletedAtIsNullOrderByIdDesc(
+                        siteId, userId, from, to, String.join(",", ALL_QUERY_TYPES));
+        if (same.isPresent()) {
+            return new ChatResult(same.get().getId(), false, null);
+        }
+        AuditReportResponse created = create(userId, siteId, new CreateAuditReportRequest(from, to, ALL_QUERY_TYPES));
+        return new ChatResult(created.reportId(), true, null);
     }
 
     // ------------------------------------------------------------------ 고치기·삭제
@@ -248,13 +297,16 @@ public class AuditReportService {
         if (ChronoUnit.DAYS.between(r.dateFrom(), r.dateTo()) + 1 > maxDays) {
             throw new BusinessException(ErrorCode.INVALID_REQUEST, "조회 기간은 " + maxDays + "일까지입니다.");
         }
+        if (r.dateTo().isAfter(LocalDate.now(clock))) {
+            throw new BusinessException(ErrorCode.INVALID_REQUEST, "조회 종료일은 오늘 이후일 수 없습니다.");
+        }
         Set<String> chosen = new LinkedHashSet<>(r.queryTypes());
         if (chosen.size() != r.queryTypes().size()) {
             throw new BusinessException(ErrorCode.INVALID_REQUEST, "조회 항목이 중복됐습니다.");
         }
         for (String type : chosen) {
             if (!QUERY_TITLES.containsKey(type)) {
-                throw new BusinessException(ErrorCode.INVALID_REQUEST, "감사보고서에 없는 조회 항목입니다: " + type);
+                throw new BusinessException(ErrorCode.INVALID_REQUEST, "감사 대응 보고서에 없는 조회 항목입니다: " + type);
             }
         }
         // 화면 순서로 정렬
@@ -395,7 +447,7 @@ public class AuditReportService {
         siteGuard.requireSiteAdmin(userId, siteId);
         AuditReport r = reportRepository.findById(reportId)
                 .filter(x -> x.getSiteId().equals(siteId) && !x.isDeleted())
-                .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND, "감사보고서를 찾을 수 없습니다."));
+                .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND, "감사 대응 보고서를 찾을 수 없습니다."));
         return r;
     }
 

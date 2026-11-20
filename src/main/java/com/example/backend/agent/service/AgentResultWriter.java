@@ -6,6 +6,7 @@ import com.example.backend.agent.repository.AgentMessageRepository;
 import com.example.backend.agent.repository.AgentRunRepository;
 import com.example.backend.agent.repository.AgentStepRepository;
 import com.example.backend.agent.repository.EvidenceCitationRepository;
+import com.example.backend.audit.service.AuditReportService;
 import com.example.backend.rule.repository.RuleRepository;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -16,7 +17,9 @@ import tools.jackson.databind.json.JsonMapper;
 import tools.jackson.databind.node.ObjectNode;
 
 import java.time.Clock;
+import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.time.format.DateTimeParseException;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -32,6 +35,8 @@ public class AgentResultWriter {
     private static final Logger log = LoggerFactory.getLogger(AgentResultWriter.class);
     private static final String WAITING = "WAITING_INPUT";
     private static final String DONE = "DONE";
+    /** route.target: 감사 대응 보고서로 이어짐. agent_runs.target_type 에도 이 값으로 연결한다 (새 칼럼 없음) */
+    public static final String AUDIT_TARGET = "AUDIT_REPORT";
     /** evidence_citations.kb_collection 허용 값 (DB ck_ev_kb_coll) */
     private static final java.util.Set<String> KB_COLLECTIONS = java.util.Set.of("kb_accidents", "kb_guides");
 
@@ -43,6 +48,7 @@ public class AgentResultWriter {
     private final RuleRepository ruleRepository;
     private final AgentDraftWriter draftWriter;
     private final EvidenceTargetLookup evidenceLookup;
+    private final AuditReportService auditReportService;
     private final JsonMapper jsonMapper;
     private final Clock clock;
 
@@ -51,7 +57,7 @@ public class AgentResultWriter {
                              AgentConversationRepository conversationRepository,
                              AgentMessageRepository messageRepository, RuleRepository ruleRepository,
                              AgentDraftWriter draftWriter, EvidenceTargetLookup evidenceLookup,
-                             JsonMapper jsonMapper, Clock clock) {
+                             AuditReportService auditReportService, JsonMapper jsonMapper, Clock clock) {
         this.runRepository = runRepository;
         this.stepRepository = stepRepository;
         this.citationRepository = citationRepository;
@@ -60,6 +66,7 @@ public class AgentResultWriter {
         this.ruleRepository = ruleRepository;
         this.draftWriter = draftWriter;
         this.evidenceLookup = evidenceLookup;
+        this.auditReportService = auditReportService;
         this.jsonMapper = jsonMapper;
         this.clock = clock;
     }
@@ -82,6 +89,11 @@ public class AgentResultWriter {
         }
 
         boolean waiting = WAITING.equals(d.runStatus());
+        if (!waiting && d.route() != null && AUDIT_TARGET.equals(d.route().target())) {
+            saveAuditRoute(run, d, data, elapsedMs);
+            return;
+        }
+        // 모르는 route.target 은 일반 완료로 처리한다 (B 감사 분기 안내)
 
         // DONE 이면 초안을 업무 DB 에 작성 중(DRAFT)으로 저장. 초안 값이 맞지 않으면 아무것도 저장하지 않고 실패
         SavedDrafts saved = SavedDrafts.nothing();
@@ -134,6 +146,62 @@ public class AgentResultWriter {
             }
         }
         failRun(run, code + ": " + message, items, elapsedMs);
+    }
+
+    // ------------------------------------------------------------------ 감사 분기
+
+    /**
+     * 작업 등록 대화의 감사 분기 (AI 서버 route.target=AUDIT_REPORT, drafts 없음): 초안을 저장하지 않고 감사 대응 보고서를 만든다.
+     * 권한·기간·미래 날짜·같은 보고서 확인은 AuditReportService.createFromChat 이 예외 없이 결과로 돌려준다.
+     * 보고서를 만들거나 이미 있으면 실행을 그 보고서에 연결(target_type=AUDIT_REPORT)하고, 거절이면 연결 없이 사유를 답한다.
+     * 실행은 어느 경우든 DONE. 만들 때 예상하지 못한 오류는 그대로 올라가 실행 전체가 실패로 정리된다 (한 트랜잭션).
+     */
+    private void saveAuditRoute(AgentRun run, WorkRegisterData d, JsonNode data, int elapsedMs) {
+        WorkRegisterData.Route route = d.route();
+        LocalDate from;
+        LocalDate to;
+        try {
+            from = LocalDate.parse(route.dateFrom());
+            to = LocalDate.parse(route.dateTo());
+        } catch (DateTimeParseException | NullPointerException e) {
+            failRun(run, "AI_BAD_RESPONSE: 감사 대응 보고서 기간을 읽을 수 없습니다.", d.steps(), elapsedMs);
+            return;
+        }
+        AuditReportService.ChatResult result = auditReportService.createFromChat(run.getUserId(), run.getSiteId(), from, to);
+
+        int seq = saveSteps(run.getId(), d.steps());
+        Map<String, Object> last = new LinkedHashMap<>();
+        last.put("route", route);
+        last.put("auditReportId", result.reportId());
+        last.put("created", result.created());
+        last.put("refusal", result.refusal());
+        stepRepository.save(new AgentStep(run.getId(), seq, AgentStepType.OUTPUT, null, null,
+                jsonMapper.writeValueAsString(last), AgentStepStatus.DONE, null));
+
+        if (result.reportId() != null) {
+            run.linkTarget(AUDIT_TARGET, result.reportId());
+        }
+        LocalDateTime now = LocalDateTime.now(clock);
+        run.complete(jsonMapper.writeValueAsString(data), null, null, elapsedMs, null, null, now);
+
+        Map<String, Object> summary = new LinkedHashMap<>();
+        summary.put("runStatus", d.runStatus());
+        summary.put("route", AUDIT_TARGET);
+        summary.put("auditReportId", result.reportId());
+        addAssistantMessage(run, auditAnswer(route, result), jsonMapper.writeValueAsString(summary), now);
+    }
+
+    /** 감사 분기 답변 문장: 거절 사유 / 이미 있는 보고서 안내 / 만들 때 AI 문구(비어 있으면 기본 문구) */
+    static String auditAnswer(WorkRegisterData.Route route, AuditReportService.ChatResult result) {
+        if (result.refusal() != null) {
+            return result.refusal();
+        }
+        if (!result.created()) {
+            return "같은 기간의 감사 대응 보고서가 이미 있어요. 감사 대응 화면에서 확인해 주세요.";
+        }
+        String message = cut(route.message(), 4000);
+        return message != null ? message
+                : route.dateFrom() + " ~ " + route.dateTo() + " 기간의 감사 대응 보고서를 만들게요. 완료되면 감사 대응 화면에서 확인할 수 있어요.";
     }
 
     // ------------------------------------------------------------------ 기록 질문
